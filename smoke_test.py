@@ -66,6 +66,7 @@ from output_writer import (Answer, Product, save, finish_run, write_csv,
                            COMPLETE_STOP_REASONS, EXIT_BLOCKED,
                            EXIT_NO_PRODUCTS, EXIT_PARTIAL, EXIT_API_ERROR,
                            LIST_CSV_SEPARATOR, SOURCE_DEFAULT)
+import product_parser  # noqa: F401 — for the private helpers below
 from product_parser import (parse_answers, SELECTORS, HOSTS, LANGUAGE_HOSTS,
                             NON_CONTENT_HOSTS, PAGE_CAP, NEXT_PAGE_SELECTOR,
                             PAGINATES_BY_URL, PAGE_URL_REASON,
@@ -343,6 +344,70 @@ def test_values_on_real_fixtures():
     ok &= check("the family prefix is byte-identical and in order",
                 [f.name for f in fields(Answer)][:5]
                 == ["source", "scraped_at", "url", "sku", "title"])
+    return ok
+
+
+def test_a_question_page_holds_other_questions_answers():
+    group("A question page carries OTHER questions' answers (§15, live)")
+    ok = True
+    # None of this is visible in an unscrolled capture, and all of it was
+    # wrong until a live run of 260 rows showed it. A scrolled question page
+    # carries, besides its own answers:
+    #
+    #   * RELATED questions, behind a badge rendered INSIDE the title node;
+    #   * MERGED duplicates, with no title node and an "Originally Answered:"
+    #     banner instead;
+    #   * promoted answers, which carry their own title node.
+    #
+    # Measured on that run: 29 rows titled "Related What is machine learning
+    # for?" and 27 rows wearing the page's own question while belonging to a
+    # different one. Both are the 100%-populated-and-wrong column §10 is
+    # about.
+    rows = rows_of("QUESTION_MERGED")
+    url = URLS["QUESTION_MERGED"]
+    page_question = product_parser._question_path(url)
+    own = [r for r in rows if product_parser._question_path(r.url) == page_question]
+    foreign = [r for r in rows if product_parser._question_path(r.url) != page_question]
+    ok &= check("the fixture holds this question's answers", own)
+    ok &= check("and answers belonging to other questions", foreign)
+
+    ok &= check("no title carries the 'Related' badge",
+                not any((r.title or "").startswith("Related") for r in rows))
+    heading = product_parser.page_question_title(fixture("QUESTION_MERGED"))
+    ok &= check("the page's own heading was found", bool(heading))
+    ok &= check("this question's own answers get that heading",
+                all(r.title == heading for r in own))
+    ok &= check("and a FOREIGN answer never wears it",
+                not any(r.title == heading for r in foreign))
+    ok &= check("a merged duplicate takes its title from the banner's link, "
+                "not from the localised 'Originally Answered:' prefix",
+                any(r.title and "Originally Answered" not in r.title
+                    and product_parser._question_path(r.url) != page_question
+                    for r in foreign))
+    ok &= check("every foreign row still has the right question_url",
+                all(r.question_url and product_parser._question_path(r.question_url)
+                    == product_parser._question_path(r.url) or r.data_source != "dom"
+                    for r in foreign))
+
+    group("An unknown title is null, never the nearest available one")
+    # Some cards name no question at all — no title node, no banner. Their
+    # `question_url` is still right, so a consumer can fetch it; inventing a
+    # title from the slug would be a guess wearing the look of a reading (§8).
+    for row in rows:
+        if row.title is None:
+            ok &= check("a titleless row still carries its question_url",
+                        bool(row.question_url))
+            break
+    else:
+        ok &= check("(this fixture happens to title every row)", True)
+
+    group("The sku is always a URL")
+    for name in ("TOPIC_EN", "TOPIC_ES", "QUESTION_EN", "QUESTION_MERGED",
+                 "PROFILE_EN"):
+        bad = [r.sku for r in rows_of(name)
+               if not re.match(r"^[a-z0-9.-]+\.quora\.com/\S+$", r.sku or "")]
+        ok &= check(f"{name}: every sku is a host and a path, no spaces "
+                    f"{'' if not bad else bad[:1]}", not bad)
     return ok
 
 
@@ -1697,6 +1762,7 @@ def main() -> int:
 
     ok &= test_numbers_and_prices()
     ok &= test_values_on_real_fixtures()
+    ok &= test_a_question_page_holds_other_questions_answers()
     ok &= test_urls()
     ok &= test_pagination()
     ok &= test_page_state()

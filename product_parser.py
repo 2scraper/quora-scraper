@@ -371,6 +371,15 @@ def permalink_key(url: str) -> Optional[str]:
     return f"{parsed.netloc.lower()}{path}"
 
 
+def _question_path(url: str) -> Optional[str]:
+    """The question part of a URL's path, for comparing two of them."""
+    question = question_url_of(url)
+    if not question:
+        return None
+    parsed = urlparse(question)
+    return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
+
+
 def question_url_of(answer_url: str) -> Optional[str]:
     """The question an answer belongs to, from its permalink.
 
@@ -476,6 +485,14 @@ SELECTORS: Dict[str, str] = {
     # and the date, in that order. Present on every card of every mode
     # (measured 30/30, 30/30, 18/18, 12/12 on four captures).
     "answer_header": ".spacing_log_answer_header",
+    # The question text INSIDE a title node, without the badge Quora puts in
+    # front of it. See `_card_question_title`.
+    "question_title_text": ".qu-userSelect--text",
+    # Quora MERGES duplicate questions, and an answer written for the
+    # merged-away one is shown on the surviving question's page under this
+    # banner: "Originally Answered: {the original question}". The banner
+    # carries a LINK whose text is that question and whose href is its URL.
+    "merged_question_banner": ".spacing_log_originally_answered_banner",
     # The question page's own heading.
     "page_question_title": "h1",
     # Quora's answer-count line on a question page.
@@ -832,6 +849,52 @@ def _card_credential(card) -> Optional[str]:
     return text or None
 
 
+def _card_question_title(card) -> Optional[str]:
+    """The question a card names, or None if it names none.
+
+    Two things sit in front of the question text and neither is the question,
+    both found by a live run rather than by a capture — a capture of an
+    unscrolled question page has neither:
+
+    * a **"Related" badge**, which Quora renders INSIDE the title node as a
+      `<div>` pill. Reading the node's text gives "Related What is machine
+      learning for?" on 29 of 260 rows of one measured run: a column 100%
+      populated and wrong, which is this family's most expensive bug class.
+      The question itself is in the node's own `qu-userSelect--text` span, so
+      the badge is skipped structurally rather than by matching the word
+      "Related" — which is localised, and would need 24 translations.
+
+    * a **merged-question banner**. Quora merges duplicate questions, and an
+      answer written for the merged-away one appears on the surviving
+      question's page under "Originally Answered: {question}". Those cards
+      have no title node at all — 27 of 260 on the same run — and the page's
+      own heading is NOT their question. The banner carries a link whose text
+      IS the question, so it is read from there; again structurally, because
+      the "Originally Answered:" prefix is localised and the link is not.
+    """
+    node = card.select_one(SELECTORS["question_title"])
+    if node is not None:
+        inner = node.select_one(SELECTORS["question_title_text"])
+        if inner is not None:
+            text = _text(inner)
+            if text:
+                return text
+        # No inner span: read the node minus any badge, rather than reading
+        # the node whole.
+        clone = BeautifulSoup(str(node), "html.parser")
+        for badge in clone.find_all("div"):
+            badge.decompose()
+        text = _text(clone)
+        if text:
+            return text
+    banner = card.select_one(SELECTORS["merged_question_banner"])
+    if banner is not None:
+        link = banner.find("a", href=True)
+        if link is not None and _text(link):
+            return _text(link)
+    return None
+
+
 def page_question_title(html: Optional[str]) -> Optional[str]:
     """A question page's own question, for the cards that do not repeat it.
 
@@ -859,6 +922,8 @@ def answers_from_dom(html: Optional[str], base_url: str) -> List[dict]:
     fallback_title = None
     rows: List[dict] = []
 
+    page_question = _question_path(base_url)
+
     for anchor in soup.select(SELECTORS["item_card"]):
         href = anchor.get("href") or ""
         absolute = _absolute(base_url, href)
@@ -866,12 +931,21 @@ def answers_from_dom(html: Optional[str], base_url: str) -> List[dict]:
         if not key or site_host(absolute) is None:
             continue
         card = _card_of(anchor)
-        title_node = card.select_one(SELECTORS["question_title"])
-        title = _text(title_node) or None
+        title = _card_question_title(card)
         if title is None:
-            if fallback_title is None:
-                fallback_title = page_question_title(html) or ""
-            title = fallback_title or None
+            # The page's own heading, and ONLY for a card that really answers
+            # the page's own question. A question page carries answers to
+            # OTHER questions too — merged duplicates, related questions and
+            # promoted answers — and handing those the page's heading is a
+            # confidently wrong value rather than a missing one (§8). Measured
+            # on one live run: 27 of 260 rows would have claimed the wrong
+            # question.
+            same_question = (page_question is not None
+                             and _question_path(absolute) == page_question)
+            if same_question:
+                if fallback_title is None:
+                    fallback_title = page_question_title(html) or ""
+                title = fallback_title or None
         author, author_url = _author_of(card)
         body = card.select_one(SELECTORS["answer_body"])
         rows.append({

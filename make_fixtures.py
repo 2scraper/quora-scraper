@@ -101,6 +101,15 @@ SOURCES = {
     # the served HTML, with the counts and the full text the DOM never shows.
     "QUESTION_EN": ("question_ml.html",
                     "https://www.quora.com/What-is-machine-learning-4", 4),
+    # A SCROLLED question page, which is the only thing that shows what a
+    # question page really holds. An unscrolled capture has this question's
+    # own answers and nothing else; scrolled, it also carries answers to
+    # OTHER questions — related ones behind a "Related" badge, and merged
+    # duplicates behind an "Originally Answered:" banner. Both were getting
+    # the wrong title until a live run found them, so this fixture exists to
+    # stop that coming back.
+    "QUESTION_MERGED": ("question_scrolled.html",
+                        "https://www.quora.com/What-is-machine-learning-4", 4),
     # A profile, which is where the Quora Session subdomain shows up: four of
     # eighteen permalinks here are on `{session}.quora.com` with no `/answer/`
     # segment at all, which no URL pattern can tell from a question page.
@@ -118,6 +127,35 @@ BLOCK_SOURCE = ("blocked_cf_challenge.html",
 # and a fixture without it cannot catch `permalink_key` regressing on the
 # ordinary `/answer/` shape alone.
 SESSION_PERMA_RE = re.compile(r'href="https://(?!www\.)[a-z0-9-]+\.quora\.com/')
+
+# QUESTION_MERGED has to keep one card of each KIND, or it pins nothing: one
+# answering this question (no title node), one "Related" (a title node with a
+# badge in front of the question) and one merged duplicate (no title node, an
+# "Originally Answered" banner instead). Picked by structure rather than by
+# position, because the order they appear in changes with every scroll.
+def _pick_by_kind(anchors, keep):
+    """Cards covering every title SHAPE the page has, not the first N."""
+    kinds = {}
+    for anchor in anchors:
+        card = P._card_of(anchor)
+        title = card.select_one(P.SELECTORS["question_title"])
+        banner = card.select_one(P.SELECTORS["merged_question_banner"])
+        if title is not None and title.find("div") is not None:
+            kind = "related"
+        elif title is not None:
+            kind = "titled"
+        elif banner is not None:
+            kind = "merged"
+        else:
+            kind = "own"
+        kinds.setdefault(kind, anchor)
+    chosen = list(kinds.values())
+    for anchor in anchors:
+        if len(chosen) >= keep:
+            break
+        if anchor not in chosen:
+            chosen.append(anchor)
+    return chosen[:max(keep, len(kinds))]
 
 
 # ---------------------------------------------------------------------------
@@ -148,55 +186,72 @@ def _filler(length: int) -> str:
     return " ".join(out)[:length]
 
 
+_SLUG_SOURCES = (r"/profile/([A-Za-z0-9%\-.]+)", r"/answer/([A-Za-z0-9%\-.]+)")
+
+
 def _profile_numbers(html: str):
-    """Every distinct `/profile/{slug}` in the capture, in first-seen order."""
+    """Every distinct author slug in the capture, in first-seen order.
+
+    BOTH `/profile/{slug}` and `/answer/{slug}`, because they are not the
+    same set: an author whose card links only its permalink never appears
+    under `/profile/`, and collecting only the latter left their slug in the
+    URL while the display-name pass rewrote the words inside it — producing
+    an sku with a space in it, which is not a URL at all.
+    """
     seen = []
-    for match in re.finditer(r"/profile/([A-Za-z0-9%\-.]+)", html):
-        slug = match.group(1)
-        if slug not in seen:
-            seen.append(slug)
+    for pattern in _SLUG_SOURCES:
+        for match in re.finditer(pattern, html):
+            slug = match.group(1)
+            if slug not in seen:
+                seen.append(slug)
     return seen
 
 
 def anonymise(html: str) -> str:
     """Replace the people in this capture, keeping everything Quora wrote.
 
-    Order matters: the profile slugs are rewritten first, so the display
-    names derived from them below line up with the URLs a reader would follow.
+    TWO SEQUENTIAL PHASES, and the order is the whole correctness argument.
+    Every URL form is rewritten first, everywhere; only then are the display
+    NAMES rewritten. Doing both inside one per-slug loop interleaves them, and
+    a slug whose name pass ran before its own `/answer/` pass came out as
+    `/answer/Fixture Author 84-7616` — a URL with a space in it, which is not
+    a URL, and which became a row's `sku`.
     """
     slugs = _profile_numbers(html)
     replacement = {}
     for index, slug in enumerate(slugs, start=1):
         replacement[slug] = f"{_SLUG_FILLER}-{index}"
-    # Longest first, so a `Name-2` slug is not half-replaced by `Name`.
+
+    # PHASE 1 — every URL form the slug appears in. Longest first, so a
+    # `Name-2` slug is not half-replaced by `Name`.
     for slug in sorted(slugs, key=len, reverse=True):
-        html = html.replace(f"/profile/{slug}", f"/profile/{replacement[slug]}")
-        # The SAME slug appears again as the last segment of every answer
-        # permalink — `/{Question-Slug}/answer/{Author-Slug}` — and replacing
-        # only the profile link leaves the person named in every sku.
-        html = html.replace(f"/answer/{slug}", f"/answer/{replacement[slug]}")
-        # The name as Quora spells it in a card, which is the slug with
-        # dashes turned into spaces and any disambiguating suffix dropped.
+        new = replacement[slug]
+        for before, after in (
+                (f"/profile/{slug}", f"/profile/{new}"),
+                # The same slug is the last segment of every answer
+                # permalink — `/{Question-Slug}/answer/{Author-Slug}` — and
+                # replacing only the profile link leaves the person named in
+                # every sku.
+                (f"/answer/{slug}", f"/answer/{new}"),
+                # Percent- and plus-encoded, inside the share-intent URLs
+                # Quora builds for Twitter and friends. Those carry the name
+                # twice over: once in the slug, once in the tweet text.
+                (f"%2Fprofile%2F{slug}", f"%2Fprofile%2F{new}"),
+                (slug.replace("-", "+"), new.replace("-", "+"))):
+            html = html.replace(before, after)
+
+    # PHASE 2 — the name as Quora SPELLS it in a card, which is the slug with
+    # dashes turned into spaces and any disambiguating suffix dropped.
+    for slug in sorted(slugs, key=len, reverse=True):
         spelled = re.sub(r"-\d+$", "", slug).replace("-", " ")
         if len(spelled) > 3:
             number = replacement[slug].rsplit("-", 1)[-1]
             html = html.replace(spelled, f"{_AUTHOR_FILLER} {number}")
 
-    # The SAME slugs again, percent-encoded, inside the share-intent URLs
-    # Quora builds for Twitter and friends. Those carry the person's name
-    # twice over — once in the slug and once in the tweet text — and a
-    # replacement that only handled the readable form leaves both.
-    for slug in sorted(slugs, key=len, reverse=True):
-        html = html.replace(f"%2Fprofile%2F{slug}",
-                            f"%2Fprofile%2F{replacement[slug]}")
-        html = html.replace(slug.replace("-", "+"),
-                            replacement[slug].replace("-", "+"))
-
-    # A Quora Session or Space lives on its own subdomain, and a Session's
-    # is built out of its subject's name
-    # (`quorasessionwith{firstlast}.quora.com`). The SHAPE is what the
-    # fixture is for — a permalink on a non-www host with no `/answer/`
-    # segment — so the host is renamed rather than dropped.
+    # A Quora Session or Space lives on its own subdomain, and a Session's is
+    # built out of its subject's name (`quorasessionwith{firstlast}`). The
+    # SHAPE is what the fixture is for — a permalink on a non-www host with no
+    # `/answer/` segment — so the host is renamed rather than dropped.
     def _rename_host(match):
         host = match.group(1) + ".quora.com"
         # es.quora.com and its twenty-two siblings are LANGUAGE hosts, not
@@ -206,10 +261,8 @@ def anonymise(html: str) -> str:
             return match.group(0)
         return "https://fixture-session.quora.com"
 
-    html = re.sub(r"https://(?!www\.)([a-z0-9-]+)\.quora\.com",
+    return re.sub(r"https://(?!www\.)([a-z0-9-]+)\.quora\.com",
                   _rename_host, html)
-
-    return html
 
 
 # The payload is a JSON document inside a JSON string literal inside a
@@ -226,6 +279,16 @@ def anonymise(html: str) -> str:
 # is what the parser is being tested on. Said out loud because it is the one
 # place a fixture is not byte-for-byte what the site sent.
 _NAME_KEYS = {"givenName": "Fixture", "familyName": "Author"}
+
+_QUORA_URL_RE = re.compile(
+    r"^https?://(?:[a-z0-9-]+\.)*(?:quora\.com|quoracdn\.net|poe\.com)(?:[/?#]|$)",
+    re.I)
+_ABSOLUTE_URL_RE = re.compile(r"^https?://", re.I)
+
+
+def _is_third_party_url(value: str) -> bool:
+    """An absolute URL pointing somewhere other than Quora's own hosts."""
+    return bool(_ABSOLUTE_URL_RE.match(value)) and not _QUORA_URL_RE.match(value)
 
 
 # Everything a credential object can say about a person, including the two
@@ -276,9 +339,14 @@ def _rewrite_payload_object(node, in_rich_text=False):
                 node[key] = _filler(len(value))
             elif key in _NAME_KEYS and isinstance(value, str):
                 node[key] = _NAME_KEYS[key]
-            elif key == "url" and in_rich_text and isinstance(value, str):
-                # A link the author put IN their answer. Their citation, not
-                # the site's, and it names third parties.
+            elif isinstance(value, str) and _is_third_party_url(value):
+                # Anything pointing off Quora: a link the author cited in
+                # their answer, and an advertiser landing page in one of the
+                # ad objects the payload carries. Neither is the site own,
+                # both name third parties, and no check needs them.
+                # Recognised by HOST rather than by key name — the ad
+                # payloads spell it `urlTemplate` and the next format will
+                # spell it something else.
                 node[key] = "https://example.invalid/fixture"
             elif key == "title" and _looks_like_rich_text(value):
                 # A QUESTION, which is the site's own content and is what the
@@ -455,7 +523,11 @@ def build_listing(name, filename, url, keep):
         raise SystemExit(f"{filename}: no answer cards found — is this a real "
                          f"capture?")
 
-    chosen = [P._card_of(a) for a in anchors[:keep]]
+    if name == "QUESTION_MERGED":
+        picked = _pick_by_kind(anchors, keep)
+    else:
+        picked = anchors[:keep]
+    chosen = [P._card_of(a) for a in picked]
     # Make sure at least one Session-subdomain permalink is in the profile
     # fixture. See SESSION_PERMA_RE.
     if name == "PROFILE_EN" and not any(
