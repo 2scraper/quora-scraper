@@ -109,25 +109,28 @@ What a refusal looks like: HTTP 403, `cf-mitigated: challenge`,
 `<title>Just a moment...</title>`, about 6 KB of body, and `cType: 'managed'`
 in the challenge's own config.
 
-Measured 2026-09-15, one residential address, about thirty fetches over
-seventy-five minutes:
+Measured 2026-09-15, one residential address, about forty-five fetches over
+three hours:
 
 | window | fetches | served | challenged |
 |---|---|---|---|
 | first ~20 minutes | 14 | 8 | 6 |
-| after that | 12 | **0** | **12** |
+| everything after | ~30 | **0** | **all of them** |
 
-Two things follow, and the second is the one that matters:
+Three things follow:
 
-- **Early on, a retry clears it.** Within the first window the same URL that
+- **A rested address recovers.** Early in that window the same URL that
   answered 403 answered 200 with the full feed on the next attempt about a
-  minute later, from the same address and the same browser. So `--retries`
-  with a `--retry-delay` of 30s or more is the first thing to try.
-- **Sustained fetching does NOT clear.** Once the address had done thirty
-  fetches, twelve consecutive attempts spanning twenty-five minutes were all
-  challenged, with retry delays of forty seconds between them. At that point
-  nothing on the client side helps: the address needs a long rest, or the
-  load needs spreading across several.
+  minute later, from the same address and the same browser. So the first
+  thing to try is `--retries 4 --retry-delay 40`.
+- **A busy address does not, and it does not recover quickly.** After about
+  thirty fetches every subsequent attempt was challenged, and a **45-minute
+  rest did not clear it** — nine further attempts across the next twenty
+  minutes were all refused. Nothing about that address changed except how
+  much it had been fetching.
+- **The score follows the ADDRESS, not the language site.** `es.quora.com`
+  refused the same address at the same moment `www.quora.com` did, with three
+  attempts each. Switching hosts is not a way around it.
 
 So `--delay` is the cheapest lever, `--proxy-file` is the one that scales, and
 "it worked an hour ago" is not evidence that it will work now.
@@ -303,9 +306,10 @@ residential address, with no key and no proxy, was served HTTP 200 and the
 full feed on **eight of the first fourteen** fetches on 2026-09-15, and the
 six refusals cleared on the next attempt.
 
-**To keep going, yes.** The next twelve fetches from that same address, over
-the following twenty-five minutes, were challenged every single time. Nothing
-about the address changed except how much it had been fetching.
+**To keep going, yes.** Everything after the first fourteen fetches from that
+same address was challenged — about thirty attempts over three hours, a
+45-minute rest included, and a second language host made no difference.
+Nothing about the address changed except how much it had been fetching.
 
 So what the paid products buy here is **rate**: many addresses is how you
 fetch a lot of Quora, and one address plus a generous `--delay` is how you

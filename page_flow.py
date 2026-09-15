@@ -269,7 +269,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 #   `_cf_chl_opt = {… cType: 'managed' …}`, a 6 KB body.
 #
 #   first ~20 minutes   14 fetches, 8 served, 6 challenged
-#   after that          12 fetches, 0 served, 12 challenged
+#   everything after    ~30 fetches over three hours, 0 served
 #
 # Three things follow, and each is a policy constant below rather than a
 # paragraph an engine might not read (§17: a policy constant nothing consults
@@ -279,11 +279,13 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 #     answered 403 answered 200 with the full feed on the next attempt about
 #     a minute later, from the same address and the same browser. So the
 #     retry budget is non-zero.
-#   * SUSTAINED it is not. The last twelve attempts, forty seconds apart over
-#     twenty-five minutes, were challenged every time. So the budget is SMALL:
-#     a few retries are worth trying and a long loop is not, because past a
-#     point nothing on the client side helps and the run should say so rather
-#     than keep paying for latency.
+#   * SUSTAINED it is not, and it does not recover quickly. Every attempt
+#     after about the thirtieth was challenged, a 45-minute rest did not
+#     clear it, and `es.quora.com` refused the same address at the same
+#     moment `www` did — the score follows the ADDRESS, not the zone. So the
+#     budget is SMALL: a few retries are worth trying and a long loop is not,
+#     because past a point nothing on the client side helps and the run
+#     should say so rather than keep paying for latency.
 #   * It is NOT SOLVABLE. A managed challenge carries no sitekey: measured 0
 #     `data-sitekey` attributes and 0 Turnstile iframes on the interstitial
 #     Quora served, with `cType: 'managed'` in its own config. There is
@@ -320,10 +322,13 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     if headless:
         hints.append("a real window helps: --headful")
     if not has_pool:
-        hints.append("the rate is what this site limits on — one exit went "
-                     "from 8-of-14 served to 0-of-12 with nothing changed but "
-                     "how much it had fetched. Raise --delay, rest the "
-                     "address, or spread the load with --proxy-file")
+        hints.append("the rate is what this site limits on, and it follows "
+                     "the ADDRESS rather than the language site — one exit "
+                     "went from 8-of-14 served to refused on everything "
+                     "after, across both www and es, with nothing changed but "
+                     "how much it had fetched. A 45-minute rest did not clear "
+                     "it. Raise --delay, rest the address for longer than "
+                     "feels necessary, or spread the load with --proxy-file")
     else:
         hints.append("with a pool in play, raise --delay before raising the "
                      "request rate: N exits still means N times the traffic")

@@ -11,27 +11,31 @@ expect.
 Cloudflare's **managed** challenge. It is the only refusal this site has been
 observed serving, and two measured facts decide what to do about it.
 
-Measured 2026-09-15, one residential address, about thirty fetches over
-seventy-five minutes:
+Measured 2026-09-15, one residential address, about forty-five fetches over
+three hours:
 
 | window | fetches | served | challenged |
 |---|---|---|---|
 | first ~20 minutes | 14 | 8 | 6 |
-| after that | 12 | **0** | **12** |
+| everything after | ~30 | **0** | **all of them** |
 
-**A rested address recovers.** Early in that window the same URL that answered
-403 answered 200 with the full feed on the next attempt about a minute later,
-from the same address and the same browser. So the first thing to try is:
+Three things follow:
 
-```bash
---retries 4 --retry-delay 40
-```
+- **A rested address recovers.** Early in that window the same URL that
+  answered 403 answered 200 with the full feed on the next attempt about a
+  minute later, from the same address and the same browser. So the first
+  thing to try is `--retries 4 --retry-delay 40`.
+- **A busy address does not, and it does not recover quickly.** After about
+  thirty fetches every subsequent attempt was challenged, and a **45-minute
+  rest did not clear it** — nine further attempts across the next twenty
+  minutes were all refused. Nothing about that address changed except how
+  much it had been fetching.
+- **The score follows the ADDRESS, not the language site.** `es.quora.com`
+  refused the same address at the same moment `www.quora.com` did, with three
+  attempts each. Switching hosts is not a way around it.
 
-**A busy address does not.** The last twelve attempts were forty seconds
-apart, spanned twenty-five minutes, and every one was challenged. Nothing
-about that address changed except how much it had been fetching — so past a
-point no retry budget helps, and the run reports exit 3 rather than spending
-your afternoon. Rest the address, or spread the load with `--proxy-file`.
+So `--delay` is the cheapest lever, `--proxy-file` is the one that scales, and
+"it worked an hour ago" is not evidence that it will work now.
 
 **Do not buy a captcha solve for this.** A managed challenge carries no
 sitekey — 0 `data-sitekey` attributes and 0 Turnstile iframes on the page

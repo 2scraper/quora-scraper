@@ -44,10 +44,11 @@ WHAT IS DIFFERENT ABOUT THIS SITE
   moment...", `cType: 'managed'`, and no sitekey — so there is nothing to pay
   a solver for. Measured 2026-09-15 from one residential exit: the first
   fourteen fetches were 8 served and 6 challenged, each of those clearing on
-  the next attempt about a minute later; the next twelve, over the following
-  twenty-five minutes, were challenged every single time with nothing changed
-  but how much that address had fetched. So the retry budget is small on
-  purpose, and `--delay` is the lever.
+  the next attempt about a minute later; everything after that — about thirty
+  attempts over three hours, a 45-minute rest included, and `es.quora.com`
+  tried too — was challenged, with nothing changed but how much that address
+  had fetched. So the retry budget is small on purpose, and `--delay` is the
+  lever.
 
 * **A bundled Chromium is enough.** Unlike a sibling site that refuses
   anything but real Chrome, Playwright's own Chromium was served HTTP 200
@@ -272,7 +273,7 @@ def _min_matches(args, html: str = "") -> int:
     Passing the counter's own range is what keeps a short last page from
     spending the whole timeout and then reporting itself unpainted.
     """
-    return page_flow.min_matches(args.mode, page_flow.expected_cards(html))
+    return page_flow.min_matches(args.mode, page_flow.answers_expected(html))
 
 
 def _classify(page, html: str, status=None) -> str:
@@ -661,8 +662,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     # True on this site because a RESTED address recovers: the same URL that
     # was challenged was served in full on the next attempt about a minute
     # later. The budget is deliberately small, because a BUSY address does
-    # not — twelve consecutive attempts over twenty-five minutes were all
-    # challenged once one exit had made about thirty requests.
+    # not: every attempt after about the thirtieth was challenged, and a
+    # 45-minute rest did not clear it.
     block_retries = 0 if not page_flow.RETRY_ON_BLOCKED else (
         args.proxy_block_retries if has_pool
         else page_flow.BLOCK_RETRIES_WITHOUT_POOL)

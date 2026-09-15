@@ -1280,6 +1280,44 @@ def test_engine_parity(skips):
     return ok
 
 
+def test_module_attributes_exist(skips):
+    group("Every `module.name` an engine reaches for actually exists (§17)")
+    ok = True
+    # The gap the signature-binding check leaves, found by a live run rather
+    # than by reading. `_min_matches` in one engine called
+    # `page_flow.expected_cards(...)` — a name renamed in the other two and
+    # not in that one — and the run died with AttributeError on its FIRST
+    # fetch, exit 1. Invisible to import, to --help, to compileall, to the
+    # undefined-NAME walk (it is an attribute, not a name) and to 490 green
+    # assertions, because nothing but a live fetch reaches that line.
+    #
+    # This walks every `page_flow.X` and `product_parser.X` in every engine
+    # and asserts X is really there. It needs no engine library: the modules
+    # being reached INTO are the shared ones, and the reaching files are read
+    # as text.
+    for engine in ENGINES:
+        source = _engine_source(engine)
+        if source is None:
+            skips.append(f"{engine} (source missing)")
+            continue
+        tree = ast.parse(source)
+        missing = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            if not isinstance(node.value, ast.Name):
+                continue
+            module = SHARED_MODULES.get(node.value.id)
+            if module is None:
+                continue
+            if not hasattr(module, node.attr):
+                missing.append(f"{node.value.id}.{node.attr}")
+        ok &= check(f"{engine} reaches for nothing that is not there "
+                    f"{'' if not missing else sorted(set(missing))}",
+                    not missing)
+    return ok
+
+
 def test_no_dead_public_names():
     group("Every public name in the policy modules has a reader (§17)")
     ok = True
@@ -1673,6 +1711,7 @@ def main() -> int:
     ok &= test_proxy_pool()
     ok &= test_credentials_never_reach_a_log()
     ok &= test_engine_parity(skips)
+    ok &= test_module_attributes_exist(skips)
     ok &= test_no_dead_public_names()
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()
