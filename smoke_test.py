@@ -779,6 +779,15 @@ def test_throttle_is_not_completion():
             continue
         ok &= check(f"{engine} counts refused GraphQL responses",
                     "_graphql_refused" in source)
+        # The same THRESHOLD in all three, not merely the same field name. A
+        # threshold that differed would mean one engine reporting `complete`
+        # where its twins report `partial` on the identical run — and this
+        # caught exactly that: the Playwright engine kept a sibling's
+        # `status == 429` while the other two used `>= 400`.
+        ok &= check(f"{engine} treats any >= 400 as a refusal, not only 429",
+                    ">= 400" in source and "== 429" not in source)
+        ok &= check(f"{engine} watches the same endpoint path",
+                    '_GRAPHQL_PATH = "/graphql/"' in source)
         ok &= check(f"{engine} distinguishes exhausted from refused",
                     "no_turnover" in source and "exhausted" in source)
     return ok

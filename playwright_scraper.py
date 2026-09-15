@@ -39,18 +39,20 @@ WHAT IS DIFFERENT ABOUT THIS SITE
   one settled scroll batch, the listing ends when a batch adds no new sku,
   and `--concurrency` above 1 is refused with that reason.
 
-* **The block is Cloudflare's managed challenge, and it is transient.**
-  HTTP 403, `cf-mitigated: challenge`, "Just a moment...", `cType:
-  'managed'`. It carries no sitekey, so there is nothing to pay a solver
-  for — and the same URL was served in full about a minute later from the
-  same address. Measured over fourteen fetches from one residential exit in
-  twenty minutes, the challenge rate went from one-in-four to three-in-three:
-  the RATE matters more than the address here.
+* **The block is Cloudflare's managed challenge, and the address's recent
+  RATE is what decides.** HTTP 403, `cf-mitigated: challenge`, "Just a
+  moment...", `cType: 'managed'`, and no sitekey — so there is nothing to pay
+  a solver for. Measured 2026-09-15 from one residential exit: the first
+  fourteen fetches were 8 served and 6 challenged, each of those clearing on
+  the next attempt about a minute later; the next twelve, over the following
+  twenty-five minutes, were challenged every single time with nothing changed
+  but how much that address had fetched. So the retry budget is small on
+  purpose, and `--delay` is the lever.
 
 * **A bundled Chromium is enough.** Unlike a sibling site that refuses
   anything but real Chrome, Playwright's own Chromium was served HTTP 200
   and the full feed on every un-challenged fetch. So no browser channel is
-  forced, and `--channel chrome` is available rather than assumed.
+  forced, and `--browser-channel chrome` is available rather than assumed.
 
 Examples
 --------
@@ -97,11 +99,11 @@ logger = logging.getLogger("playwright_scraper")
 # omission. A sibling site reads the CLIENT before the address and refuses a
 # bundled Chromium outright; Quora does not. Playwright's own Chromium was
 # served HTTP 200 and the full feed on every fetch that was not challenged —
-# eight of fourteen, from one residential exit on 2026-09-15 — and the six
-# refusals were Cloudflare's managed challenge, which a real Chrome met at
-# the same rate. Naming it here rather than at the call site so the smoke
-# suite can assert the three engines agree on it; `--channel chrome` is still
-# available for a reader who wants it.
+# eight of the first fourteen, from one residential exit on 2026-09-15 — and
+# the refusals were Cloudflare's managed challenge, which tracks the ADDRESS's
+# recent request rate rather than the browser build. Named here rather than at
+# the call site so the smoke suite can assert the three engines agree on it;
+# `--browser-channel chrome` is still available for a reader who wants it.
 DEFAULT_BROWSER_CHANNEL = None
 
 # How long to wait for a remote browser to accept the CDP connection.
@@ -226,14 +228,30 @@ def _page_height(page) -> Optional[int]:
         return None
 
 
+# Each scroll batch after the first arrives over POST /graphql, and that
+# endpoint can be refused while the HTML keeps answering 200. Counting the
+# refusals is what separates a feed that ran out (COMPLETE) from one whose
+# next batch was refused (PARTIAL) — without it the two are the same
+# observation and a throttled run reports "complete" holding its first batch
+# (§7).
+#
+# Any status at or above 400, rather than one specific code, and the SAME
+# threshold in all three engines. A threshold that differed between them
+# would mean one engine reporting `complete` where its twins report `partial`
+# on the identical run, which is precisely the drift the shared modules exist
+# to prevent (§6) — and this file carried a sibling repo's single-code check
+# for several commits before the smoke suite was taught to compare the three.
+_GRAPHQL_PATH = "/graphql/"
+
+
 def _watch_graphql(session) -> None:
-    """Start counting throttled /graphql responses on this session's page."""
-    session._graphql_429 = 0
+    """Start counting refused GraphQL responses on this session's page."""
+    session._graphql_refused = 0
 
     def _on_response(response):
         try:
-            if "/graphql" in response.url and response.status == 429:
-                session._graphql_429 += 1
+            if _GRAPHQL_PATH in response.url and response.status >= 400:
+                session._graphql_refused += 1
         except Exception:  # noqa: BLE001 — a listener must never break a run
             pass
 
@@ -241,7 +259,7 @@ def _watch_graphql(session) -> None:
 
 
 def _graphql_refused_count(session) -> int:
-    return getattr(session, "_graphql_429", 0)
+    return getattr(session, "_graphql_refused", 0)
 
 
 def _ready_selector(args) -> str:
@@ -628,7 +646,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     explicit rather than leaving a stale URL to look like it was fetched.
 
     Returns a PageOutcome and never raises for an EXPECTED failure — a
-    timeout, a 429 refusal, a challenge page, a dead exit are all recorded on
+    timeout, a refusal, a challenge page, a dead exit are all recorded on
     the outcome instead.
 
     Always goes through `session.page`, never a captured local: a rotation
@@ -640,9 +658,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     has_pool = bool(pool and len(pool) > 1)
     # `RETRY_ON_BLOCKED` is CONSULTED, not merely documented — a policy
     # constant nothing reads is the same defect as dead code (§17). It is
-    # True on this site, unlike a sibling repo's, because the refusal here is
-    # a RATE response that clears: the same URL that answered 429 answered
-    # 200 with the full grid minutes later from the same address.
+    # True on this site because a RESTED address recovers: the same URL that
+    # was challenged was served in full on the next attempt about a minute
+    # later. The budget is deliberately small, because a BUSY address does
+    # not — twelve consecutive attempts over twenty-five minutes were all
+    # challenged once one exit had made about thirty requests.
     block_retries = 0 if not page_flow.RETRY_ON_BLOCKED else (
         args.proxy_block_retries if has_pool
         else page_flow.BLOCK_RETRIES_WITHOUT_POOL)
@@ -796,8 +816,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                 time.sleep(pause)
             else:
                 # No pool, so nowhere else to go — but on this site a plain
-                # wait is often what clears it, because the 429 is a rate
-                # response rather than a verdict on the address. The browser
+                # wait is often what clears it, because the challenge is a
+                # rate response rather than a verdict on the address. The
+                # browser
                 # is NOT relaunched over --cdp-endpoint: a profile allows one
                 # live connection, so reconnecting risks `profile_locked` and
                 # would lose the cookies the retry is meant to build on.
