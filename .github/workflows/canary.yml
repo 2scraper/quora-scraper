@@ -1,0 +1,395 @@
+name: canary
+
+# tests.yml (deliberately) never touches quora.com — see its own header for
+# why. That leaves a real gap: a markup change on the site only shows up when
+# a user hits it and files an issue, while the offline badge stays green
+# throughout. This workflow is the other half: real runs against real URLs,
+# so a site-side break is caught here first.
+#
+# TWO RUNS, BECAUSE THIS REPO HAS TWO READ PATHS
+# -----------------------------------------------
+# A question page carries its first answers in Quora's own inline GraphQL
+# payload; a topic page carries none and is read entirely off the rendered
+# cards. Those are different code, and a canary that exercised one would go
+# green while the other was broken. So:
+#
+#   1. a QUESTION url, 3 scroll batches — the payload path, the scroll, and
+#      the merge of the two views
+#   2. a TOPIC url, 1 batch — the DOM-only path, where every count is null
+#      by design and the card hooks are all there is
+#
+# Three batches and not one: with a single batch the scroll is never
+# exercised, and the scroll is the single most fragile thing in this repo —
+# Quora publishes no rel=next, no pagination control and no per-batch
+# address, so if the feed stops extending there is nothing to fall back on.
+#
+# WHAT THIS CANARY NEEDS, AND WHAT IT DOES NOT
+# --------------------------------------------
+# It needs NO SECRET to do real work, and that is measured rather than hoped:
+# Playwright's own bundled Chromium, from an ordinary residential address
+# with no key and no proxy, was served HTTP 200 and the full feed on eight of
+# fourteen fetches on 2026-09-15.
+#
+# WHAT IS NOT MEASURED, and is therefore not asserted: whether a GitHub
+# runner's DATACENTRE address gets served at all. What IS measured is that
+# Cloudflare's challenge here tracks the address's recent request RATE — the
+# same fourteen fetches took the challenge rate from one-in-four to
+# three-in-three — and a shared runner address is a much worse starting
+# position than a home connection. So a blocked run here is reported as a
+# WARNING and does not fail the badge, UNLESS a `QUORA_PROXY` secret is set:
+# with a residential exit in play, a block stops being an access condition
+# and starts being a signal.
+#
+#     gh secret set QUORA_PROXY --repo 2scraper/quora-scraper
+#
+# The secret is passed through the ENVIRONMENT, which env_config.py already
+# reads for exactly this variable, rather than through a --proxy flag. Two
+# reasons: a credential on a command line is readable by anything that can
+# run `ps`, which is the rule this repo states and should therefore follow in
+# its own CI; and an unset secret arrives as an empty string, which the
+# loader already treats as "not configured", so there is no commented-out
+# line for anyone to forget to uncomment. One line is correct with and
+# without it.
+#
+# A check that is always red teaches everyone to ignore checks, which is
+# worse than having no check at all — hence the warning path. But a warning
+# must not read as a pass either, so every one of them also writes to the
+# step summary saying in words that the canary did not test anything.
+
+on:
+  schedule:
+    # 06:20 UTC. Off the hour, because everything else in the world runs on
+    # it and a queued runner adds nothing but latency.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # `secrets` is not available in a job-level `if`, so presence is tested
+      # through the job env and read in each step's condition.
+      HAVE_PROXY: ${{ secrets.QUORA_PROXY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the client and Chromium
+        # `chromium`, not `chrome`, and unlike a sibling repo that is not a
+        # compromise: this site was measured serving the bundled build the
+        # full feed. Headful under xvfb, because every figure in this repo's
+        # README was taken headful and headless was not separately measured
+        # against Quora's challenge rate.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends xvfb
+
+      - name: Scrape a real question page (the inline-payload path)
+        id: run
+        # --delay 20: the rate is what this site limits on, and a shared
+        # runner address is a worse starting position than a home connection.
+        #
+        # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
+        # this a non-zero scraper exit aborts the script on THAT line and the
+        # `echo "exit_code=$?"` below never runs. continue-on-error only
+        # stops the step from failing the job; it does not touch errexit.
+        continue-on-error: true
+        env:
+          QUORA_PROXY: ${{ secrets.QUORA_PROXY }}
+        run: |
+          set +e
+          xvfb-run -a python3 playwright_scraper.py \
+            --url "https://www.quora.com/What-is-machine-learning-4" \
+            --pages 3 --delay 20 --retries 4 --retry-delay 30 \
+            --out canary_question --dump-html canary_question.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the exit code
+        id: verdict
+        # ACCESS CONDITIONS ARE NOT DEFECTS, and on this site that
+        # distinction is what decides whether the badge means anything.
+        run: |
+          set -e
+          code="${{ steps.run.outputs.exit_code }}"
+          tested=true
+          case "$code" in
+            0)
+              echo "OK — rows parsed from a live run." ;;
+            3)
+              if [ "$HAVE_PROXY" = "true" ]; then
+                echo "::error::Blocked (exit 3) WITH a residential proxy in play. That is no longer an access condition — either Cloudflare's rules for this site have changed, or the challenge no longer clears on retry. The debug dump in the artefacts carries the interstitial."
+                exit 1
+              fi
+              tested=false
+              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner, with no QUORA_PROXY secret set. Cloudflare's challenge on this site tracks the address's recent request rate, and a shared datacentre address is the worst case for that — so this says nothing about this code and the run is not failed. It also means the site-side check did NOT happen today. Set QUORA_PROXY to make this canary real."
+              echo "### Canary did NOT test anything (exit 3, blocked)" >> "$GITHUB_STEP_SUMMARY"
+              echo "A bare runner address met Cloudflare's managed challenge. The parser was not exercised. Set a \`QUORA_PROXY\` secret to give this canary a residential exit; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
+            6)
+              tested=false
+              echo "::warning::Partial run (exit 6). The commonest cause here is a scroll batch being refused: the HTML keeps answering 200 while POST /graphql is refused. canary_question.meta.json carries the stop_reason. Not failed, because that is an access condition — but if it repeats every day, suspect the card anchor instead."
+              echo "### Canary tested only PART of the run (exit 6)" >> "$GITHUB_STEP_SUMMARY"
+              echo "See \`stop_reason\` in the sidecar artefact. \`next_batch_refused\` is rate limiting; anything else is worth reading." >> "$GITHUB_STEP_SUMMARY" ;;
+            5)
+              tested=false
+              echo "::warning::Remote API error (exit 5) — a remote endpoint refused the connection, so nothing was tested."
+              echo "### Canary did NOT test anything (exit 5)" >> "$GITHUB_STEP_SUMMARY" ;;
+            4)
+              echo "::error::Ran fine and parsed 0 rows (exit 4) from a question that holds hundreds of answers. The card anchor (a.answer_timestamp) or the inline-payload push pattern has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
+              exit 1 ;;
+            2)
+              echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site."
+              exit 1 ;;
+            *)
+              echo "::error::Unexpected exit code $code (see the step above for the traceback)."
+              exit 1 ;;
+          esac
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check the question run
+        # Only when the run actually got in: on a blocked run there is no
+        # output file, and a missing file would fail for the wrong reason.
+        if: steps.verdict.outputs.tested == 'true'
+        # Exit 0 only means "some rows were written". It says nothing about
+        # whether the page rendered: a snapshot taken too early still writes
+        # rows, just with fields empty. Every floor below is set from a
+        # measured figure and deliberately under it, so this fails on a
+        # collapse rather than on normal variation.
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          # A measured question page rendered 12 answers on its first paint
+          # and the inline payload carried 5 more views of them. Three
+          # batches should comfortably exceed this; the floor is set well
+          # under so a slow scroll cannot trip it.
+          MIN_ROWS = 12
+
+          rows = json.loads(Path("canary_question.json").read_text())
+          meta = json.loads(Path("canary_question.meta.json").read_text())
+          fail = []
+
+          if len(rows) < MIN_ROWS:
+              fail.append(f"only {len(rows)} rows, expected at least "
+                          f"{MIN_ROWS} after three scroll batches")
+
+          if meta.get("status") != "complete":
+              fail.append(f"status is {meta.get('status')!r}, not 'complete' "
+                          f"(stop_reason {meta.get('stop_reason')!r})")
+          if meta.get("mode") != "question":
+              fail.append(f"mode is {meta.get('mode')!r}, not 'question' — "
+                          f"the URL-to-mode inference has changed")
+
+          skus = [r.get("sku") for r in rows]
+          if len(set(skus)) != len(skus):
+              fail.append(f"{len(skus) - len(set(skus))} duplicate sku(s) — "
+                          f"the dedupe is not running")
+          # The sku is the answer's permalink with the scheme removed.
+          bad_sku = [s for s in skus
+                     if not re.match(r"^[a-z0-9.-]+\.quora\.com/", s or "")]
+          if bad_sku:
+              fail.append(f"{len(bad_sku)} sku(s) are not a Quora permalink: "
+                          f"{bad_sku[:3]}")
+
+          # THE PAIR, which is worthless unless it is unique. A sibling repo
+          # shipped `page` stuck at 1 across a two-page run and 60 of 119
+          # rows silently claimed a position another row already held.
+          pairs = [(r.get("page"), r.get("position")) for r in rows]
+          if len(set(pairs)) != len(pairs):
+              fail.append(f"{len(pairs) - len(set(pairs))} duplicate "
+                          f"(page, position) pair(s)")
+
+          # Fully populated on every measured capture — 13/13 on the
+          # question page, 30/30 and 18/18 on a topic and a profile.
+          for field, floor in (("title", 1.0), ("sku", 1.0), ("url", 1.0),
+                               ("question_url", 1.0), ("author", 0.95),
+                               ("text", 0.95), ("text_chars", 0.95),
+                               ("data_source", 1.0), ("mode", 1.0),
+                               ("language", 1.0), ("category", 1.0),
+                               ("page", 1.0), ("position", 1.0),
+                               ("source", 1.0)):
+              got = sum(1 for r in rows if r.get(field) not in (None, ""))
+              if rows and got / len(rows) < floor:
+                  fail.append(f"{field} present on only {got}/{len(rows)} rows "
+                              f"(floor {floor:.0%})")
+
+          # THE INLINE-PAYLOAD INVARIANT, and the reason this canary reads a
+          # QUESTION url rather than a topic one. A question page carries
+          # answers in its served payload — 5 of 12 rendered, measured — so
+          # some rows here must have the columns only that payload can fill.
+          # Zero of them means the push pattern moved and the run silently
+          # degraded to the DOM-only path, which looks completely healthy.
+          enriched = [r for r in rows if r.get("data_source") != "dom"]
+          if not enriched:
+              fail.append("no row was built from the inline GraphQL payload "
+                          "(every data_source is 'dom'). The "
+                          "inlineQueryResults push pattern has most likely "
+                          "moved — upvotes, views, creation time and the full "
+                          "answer text are all silently null now")
+          else:
+              for field in ("upvotes", "views", "created_at", "answer_id",
+                            "question_id", "answer_count"):
+                  got = sum(1 for r in enriched if r.get(field) is not None)
+                  if got == 0:
+                      fail.append(f"{field} is null on all {len(enriched)} "
+                                  f"payload-backed row(s) — that field's key "
+                                  f"has moved in Quora's schema")
+
+          # A row with no payload behind it must NOT carry payload-only
+          # columns: that would mean a value arrived from somewhere nobody
+          # wrote down, which is worse than a null (§8).
+          for r in rows:
+              if r.get("data_source") == "dom":
+                  leaked = [f for f in ("upvotes", "views", "shares",
+                                        "created_at", "answer_id")
+                            if r.get(f) is not None]
+                  if leaked:
+                      fail.append(f"{r.get('sku')} has data_source 'dom' but "
+                                  f"carries {leaked} — provenance is lying")
+                      break
+
+          # Counts are counts: never negative, and a view count below an
+          # upvote count means the two have been swapped.
+          for r in enriched:
+              for field in ("upvotes", "views", "shares", "comments"):
+                  v = r.get(field)
+                  if v is not None and v < 0:
+                      fail.append(f"{r.get('sku')} has {field}={v}")
+                      break
+
+          # Quora's timestamps are epoch MICROSECONDS. Read as seconds they
+          # land in the year 57 million and read as milliseconds in 57705 —
+          # both parse without error, which is why this is asserted rather
+          # than trusted.
+          now = datetime.now(timezone.utc)
+          for r in enriched:
+              stamp = r.get("created_at")
+              if not stamp:
+                  continue
+              try:
+                  when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+              except ValueError:
+                  fail.append(f"created_at {stamp!r} is not ISO 8601")
+                  break
+              if not (2009 <= when.year <= now.year):
+                  fail.append(f"created_at {stamp!r} is outside Quora's "
+                              f"lifetime (the site launched in 2009) — the "
+                              f"epoch unit is most likely wrong")
+                  break
+
+          # An answer whose body is present must have a length that matches
+          # it. A column that is 100% populated and entirely wrong is this
+          # family's most expensive bug class (§10).
+          for r in rows:
+              if r.get("text") and r.get("text_chars") != len(r["text"]):
+                  fail.append(f"{r.get('sku')}: text_chars "
+                              f"{r.get('text_chars')} != len(text) "
+                              f"{len(r['text'])}")
+                  break
+
+          if fail:
+              print("::error::Live run parsed rows, but they do not look right:")
+              for line in fail:
+                  print(f"  - {line}")
+              sys.exit(1)
+
+          print(f"ok  {len(rows)} rows, {len(enriched)} payload-backed, "
+                f"status {meta.get('status')}, "
+                f"batches {meta.get('pages_completed')}/"
+                f"{meta.get('pages_requested')}")
+          EOF
+
+      - name: Scrape a real topic feed (the DOM-only path)
+        id: topic
+        continue-on-error: true
+        env:
+          QUORA_PROXY: ${{ secrets.QUORA_PROXY }}
+        run: |
+          set +e
+          xvfb-run -a python3 playwright_scraper.py \
+            --url "https://www.quora.com/topic/Machine-Learning" \
+            --pages 1 --delay 20 --retries 4 --retry-delay 30 \
+            --out canary_topic --dump-html canary_topic.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check the topic run
+        # A block here is an access condition exactly as above, so it only
+        # runs when the fetch succeeded — and when it did, the DOM-only
+        # invariants are asserted properly.
+        if: steps.topic.outputs.exit_code == '0'
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+
+          # A measured topic page rendered 20 answers on its first paint.
+          MIN_ROWS = 10
+
+          rows = json.loads(Path("canary_topic.json").read_text())
+          fail = []
+
+          if len(rows) < MIN_ROWS:
+              fail.append(f"only {len(rows)} rows from a topic feed, expected "
+                          f"at least {MIN_ROWS}")
+
+          # THE TOPIC INVARIANT, and it is the opposite of the question one.
+          # Quora sends a topic's answers over a later XHR, so NO row here
+          # can be payload-backed. A row that is means the page kind has
+          # changed what it carries — which would be good news, and still
+          # wants a human to look, because the README says the opposite.
+          enriched = [r for r in rows if r.get("data_source") != "dom"]
+          if enriched:
+              fail.append(f"{len(enriched)} topic row(s) are payload-backed. "
+                          f"Measured, a topic page carries 0 Answer objects "
+                          f"in its inline payloads. If Quora has started "
+                          f"server-rendering them this is an improvement — "
+                          f"but the README, the parser's docstring and this "
+                          f"check all say otherwise and need updating")
+
+          # The card hooks are everything in this mode.
+          for field, floor in (("title", 1.0), ("author", 0.95),
+                               ("text", 0.95), ("date_text", 0.95),
+                               ("author_credential", 0.80)):
+              got = sum(1 for r in rows if r.get(field) not in (None, ""))
+              if rows and got / len(rows) < floor:
+                  fail.append(f"{field} present on only {got}/{len(rows)} "
+                              f"topic rows (floor {floor:.0%})")
+
+          if fail:
+              print("::error::The topic run parsed rows that do not look right:")
+              for line in fail:
+                  print(f"  - {line}")
+              sys.exit(1)
+          print(f"ok  {len(rows)} topic rows, all DOM-built as expected")
+          EOF
+
+      - name: Note a blocked topic run without failing
+        if: steps.topic.outputs.exit_code != '0'
+        run: |
+          echo "::warning::The topic run exited ${{ steps.topic.outputs.exit_code }} — the DOM-only path was not exercised today. See the artefacts."
+          echo "### The topic (DOM-only) half of the canary did not run" >> "$GITHUB_STEP_SUMMARY"
+
+      # Uploaded on EVERY run, including the blocked ones: the interstitial
+      # is the only way to see what refused us, and it is gone by the time
+      # anyone reads the log.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canary-artefacts
+          path: |
+            canary_*.json
+            canary_*.html
+            canary_*.csv
+            canary_*_debug.*
+          if-no-files-found: ignore
+          retention-days: 14
