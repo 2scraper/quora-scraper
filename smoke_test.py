@@ -47,6 +47,7 @@ import inspect
 import io
 import json
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -1270,6 +1271,66 @@ def test_engine_parity(skips):
     return ok
 
 
+def test_no_dead_public_names():
+    group("Every public name in the policy modules has a reader (§17)")
+    ok = True
+    # §17's check 5, automated. A public name nothing reads is dead code, and
+    # a policy CONSTANT nothing reads is worse: the prose beside it reads
+    # like enforcement. A sibling repo shipped `RETRY_ON_BLOCKED` with a
+    # paragraph of measured justification and no engine consulting it.
+    #
+    # Scoped to the two modules that hold this repo's decisions, because the
+    # family core is shared and its unused corners are another repo's
+    # problem. References are counted across the whole repository INCLUDING
+    # the defining module, so a helper used only by its own neighbours
+    # counts — what this catches is a name with no reader anywhere at all.
+    scanned = []
+    for path in sorted(pathlib.Path(REPO_ROOT).rglob("*.py")):
+        parts = path.relative_to(REPO_ROOT).parts
+        # Skip local tools and any nested checkout. Matching on RELATIVE
+        # parts, not on the absolute path: the absolute one can itself sit
+        # under a directory this would otherwise exclude, and then the
+        # corpus comes back empty and every name reads as dead — which is
+        # how this check first "found" 91 dead names in a healthy module.
+        if path.name.startswith("_"):
+            continue
+        if any(part in {"worktrees", ".venv", "venv", "build", "dist"}
+               for part in parts):
+            continue
+        scanned.append(path.read_text(encoding="utf-8"))
+    corpus = "\n".join(scanned)
+    if len(corpus) < 10_000:
+        return check("the dead-name corpus is not empty (it would make "
+                     "every name look dead)", False)
+
+    for module in ("product_parser", "page_flow"):
+        source = open(os.path.join(REPO_ROOT, module + ".py"),
+                      encoding="utf-8").read()
+        tree = ast.parse(source)
+        names = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                if not node.name.startswith("_"):
+                    names.append(node.name)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id.isupper():
+                        names.append(target.id)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if node.target.id.isupper():
+                    names.append(node.target.id)
+        dead = []
+        for name in names:
+            # Two references minimum: the definition, and at least one read.
+            hits = len(re.findall(r"\b" + re.escape(name) + r"\b", corpus))
+            if hits < 2:
+                dead.append(name)
+        ok &= check(f"{module} has no unread public name "
+                    f"{'' if not dead else sorted(dead)}", not dead)
+    return ok
+
+
 def test_no_undefined_names():
     group("Names that resolve, not just parse (§10)")
     # `compileall` proves a file PARSES, not that its names RESOLVE. A live
@@ -1603,6 +1664,7 @@ def main() -> int:
     ok &= test_proxy_pool()
     ok &= test_credentials_never_reach_a_log()
     ok &= test_engine_parity(skips)
+    ok &= test_no_dead_public_names()
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()
     ok &= test_wording()

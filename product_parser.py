@@ -318,11 +318,6 @@ def listing_kind(url: str) -> str:
     return "unknown"
 
 
-def topic_slug(url: str) -> Optional[str]:
-    m = _TOPIC_RE.match(urlparse(url or "").path)
-    return m.group("slug") if m else None
-
-
 def category_from_url(url: str) -> Optional[str]:
     """The `category` column: the topic, the profile or the question slug.
 
