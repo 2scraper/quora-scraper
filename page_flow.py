@@ -66,7 +66,7 @@ READY_SELECTOR = SELECTORS["item_card"]
 # a topic page, 12 on a question page, 18 on a profile.
 MIN_CARD_MATCHES = 2
 
-# Generous against a measured first paint of 3-8s. A residential exit and a
+# Generous against a measured first paint of 3-8s. A distant exit and a
 # cold cache are both slower than a laptop on a home connection, and the cost
 # of waiting too long is latency where the cost of waiting too little is a
 # run that reports an empty topic.
@@ -263,7 +263,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 
 
 # What Quora actually serves when it refuses, measured 2026-09-15 over about
-# thirty fetches from one residential address across seventy-five minutes:
+# thirty fetches from one DATACENTRE address across seventy-five minutes:
 #
 #   HTTP 403, `cf-mitigated: challenge`, `<title>Just a moment...</title>`,
 #   `_cf_chl_opt = {… cType: 'managed' …}`, a 6 KB body.

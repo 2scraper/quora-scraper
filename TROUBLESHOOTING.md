@@ -11,8 +11,8 @@ expect.
 Cloudflare's **managed** challenge. It is the only refusal this site has been
 observed serving, and two measured facts decide what to do about it.
 
-Measured 2026-09-15, one residential address, about forty-five fetches over
-three hours:
+Measured 2026-09-15, one DATACENTRE address (a netcup host in Nuremberg),
+about forty-five fetches over three hours:
 
 | window | fetches | served | challenged |
 |---|---|---|---|

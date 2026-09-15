@@ -1621,6 +1621,73 @@ def test_dockerfile_matches_its_entrypoint():
     return ok
 
 
+def test_no_file_describes_another_site():
+    group("No shipped file still describes a different site (§17)")
+    ok = True
+    # A sibling repo's audit found "a shipped file still described another
+    # site", and this repo inherited the same thing FOUR times over: a
+    # CONTRIBUTING section about `data-testid="divSRPContentProducts"` and
+    # sold counts, a list of invariants about auction lots and reserve
+    # prices, a captcha module explaining an Akamai "Access Denied" page, and
+    # an issue template about seller feedback scores. All four were copied in
+    # with the family core and all four read as authoritative.
+    #
+    # Nothing here can tell a paragraph about Quora from a paragraph about a
+    # rental site in general. What it CAN do is notice the vocabulary of the
+    # specific siblings this repo was copied from, which is where the real
+    # leakage comes from.
+    foreign = {
+        "akamai": "a sibling's bot manager",
+        "datadome": "a sibling's bot manager",
+        "bot or not": "a sibling's challenge page",
+        "reserve_price_set": "a sibling's auction column",
+        "seller_score": "a sibling's seller column",
+        "stay_dates": "a sibling's booking column",
+        "fewo-direkt": "a sibling's storefront",
+        "stayz.com.au": "a sibling's storefront",
+        "vrbo": "a sibling repo",
+        "tokopedia": "a sibling repo",
+        "catawiki": "a sibling repo",
+        "craigslist": "a sibling repo",
+        "mediamarkt": "a sibling repo",
+        "farfetch": "a sibling repo",
+        "divsrpcontentproducts": "a sibling's grid selector",
+        "lodging-card-responsive": "a sibling's card selector",
+    }
+    # A CONTEXT allowlist, the same shape ci_checks.py uses for credentials,
+    # because one of these words is legitimate in exactly one place. §8 says
+    # captcha DETECTION stays broad — which challenge a visitor meets depends
+    # on the exit and on what the address has been doing — so
+    # `BOT_CHALLENGE_MARKERS` names vendors this site has never served, on
+    # purpose. That is a marker list, not a description of the site, and the
+    # difference is the whole point of this check.
+    allowed = {("product_parser.py", "datadome")}
+
+    checked = 0
+    for path in sorted(pathlib.Path(REPO_ROOT).rglob("*")):
+        rel = path.relative_to(REPO_ROOT)
+        if not path.is_file() or path.suffix not in (".py", ".md", ".yml",
+                                                     ".yaml", ".toml",
+                                                     ".example"):
+            continue
+        if any(part in {"worktrees", ".venv", "venv", "build", "dist", ".git"}
+               for part in rel.parts) or path.name.startswith("_"):
+            continue
+        # The suite names these words in order to ban them, so it cannot be
+        # scanned for them without failing on its own check.
+        if path.name == "smoke_test.py":
+            continue
+        checked += 1
+        lowered = path.read_text(encoding="utf-8", errors="replace").lower()
+        hits = sorted({word for word in foreign
+                       if word in lowered
+                       and (path.name, word) not in allowed})
+        ok &= check(f"{rel} describes this site "
+                    f"{'' if not hits else hits}", not hits)
+    ok &= check(f"…and {checked} files were actually scanned", checked > 20)
+    return ok
+
+
 def test_wording():
     group("Wording enforced by a test (§12)")
     ok = True
@@ -1848,6 +1915,7 @@ def main() -> int:
     ok &= test_no_dead_public_names()
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()
+    ok &= test_no_file_describes_another_site()
     ok &= test_wording()
     ok &= test_no_capture_leaks()
     ok &= test_ci_checks_is_wired_up()

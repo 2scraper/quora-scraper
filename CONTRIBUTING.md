@@ -106,9 +106,9 @@ Then the rest of the presentation, in the order that matters:
 1. `python3 smoke_test.py` green, and the canary dispatched at least once —
    including its WARNING branch, which is what runs when a bare GitHub
    runner's datacentre address is refused and no `QUORA_PROXY` secret is set.
-   This canary needs no secret to do real work from an ordinary residential
-   address — measured: eight of fourteen fetches were served in full with no
-   key and no proxy. What it has NOT been measured doing is getting past
+   This canary needs no secret to do real work: eight of fourteen fetches
+   were served in full with no key and no proxy, from a DATACENTRE address
+   at that. What it has NOT been measured doing is getting past
    Cloudflare from a shared datacentre address, and since the challenge here
    tracks the address's recent request rate, a runner is the worst case for
    it. That is exactly why a block there is a warning rather than a failure —

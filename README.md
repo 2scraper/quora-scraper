@@ -109,8 +109,8 @@ What a refusal looks like: HTTP 403, `cf-mitigated: challenge`,
 `<title>Just a moment...</title>`, about 6 KB of body, and `cType: 'managed'`
 in the challenge's own config.
 
-Measured 2026-09-15, one residential address, about forty-five fetches over
-three hours:
+Measured 2026-09-15, one DATACENTRE address (a netcup host in Nuremberg),
+about forty-five fetches over three hours:
 
 | window | fetches | served | challenged |
 |---|---|---|---|
@@ -344,9 +344,11 @@ topic feed or for breadth of rows.
 ## Do you need any of the paid products?
 
 **Not to get started.** Playwright's own bundled Chromium, from an ordinary
-residential address, with no key and no proxy, was served HTTP 200 and the
+DATACENTRE address, with no key and no proxy, was served HTTP 200 and the
 full feed on **eight of the first fourteen** fetches on 2026-09-15, and the
-six refusals cleared on the next attempt.
+six refusals cleared on the next attempt. That is a stronger result than it
+sounds: a datacentre range is the first thing any bot manager scores, and
+this one was served anyway.
 
 **To keep going, yes.** Everything after the first fourteen fetches from that
 same address was challenged — about thirty attempts over three hours, a

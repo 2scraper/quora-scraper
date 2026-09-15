@@ -25,20 +25,21 @@ name: canary
 #
 # WHAT THIS CANARY NEEDS, AND WHAT IT DOES NOT
 # --------------------------------------------
-# It needs NO SECRET to do real work, and that is measured rather than hoped:
-# Playwright's own bundled Chromium, from an ordinary residential address
-# with no key and no proxy, was served HTTP 200 and the full feed on eight of
-# fourteen fetches on 2026-09-15.
+# It needs NO SECRET to do real work, and that is measured rather than hoped —
+# from a DATACENTRE address at that. Playwright's own bundled Chromium, with
+# no key and no proxy, from a netcup host in Nuremberg, was served HTTP 200
+# and the full feed on eight of the first fourteen fetches on 2026-09-15. So
+# "a runner will be refused because it is a datacentre" is NOT this site's
+# behaviour, and this canary does not assume it.
 #
-# WHAT IS NOT MEASURED, and is therefore not asserted: whether a GitHub
-# runner's DATACENTRE address gets served at all. What IS measured is that
-# Cloudflare's challenge here tracks the address's recent request RATE — the
-# same fourteen fetches took the challenge rate from one-in-four to
-# three-in-three — and a shared runner address is a much worse starting
-# position than a home connection. So a blocked run here is reported as a
-# WARNING and does not fail the badge, UNLESS a `QUORA_PROXY` secret is set:
-# with a residential exit in play, a block stops being an access condition
-# and starts being a signal.
+# WHAT IS measured is that the challenge tracks the address's recent request
+# RATE: everything after those first fourteen fetches was refused, and a
+# 45-minute rest did not clear it. A shared GitHub runner is used by many
+# jobs, so its recent rate is not something this workflow controls — which is
+# the real reason a blocked run here is reported as a WARNING and does not
+# fail the badge, UNLESS a `QUORA_PROXY` secret is set: with an exit this
+# workflow does control, a block stops being an access condition and starts
+# being a signal.
 #
 #     gh secret set QUORA_PROXY --repo 2scraper/quora-scraper
 #
@@ -96,7 +97,7 @@ jobs:
       - name: Scrape a real question page (the inline-payload path)
         id: run
         # --delay 20: the rate is what this site limits on, and a shared
-        # runner address is a worse starting position than a home connection.
+        # runner's recent rate is not something this workflow can see.
         #
         # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
         # this a non-zero scraper exit aborts the script on THAT line and the
@@ -126,13 +127,13 @@ jobs:
               echo "OK — rows parsed from a live run." ;;
             3)
               if [ "$HAVE_PROXY" = "true" ]; then
-                echo "::error::Blocked (exit 3) WITH a residential proxy in play. That is no longer an access condition — either Cloudflare's rules for this site have changed, or the challenge no longer clears on retry. The debug dump in the artefacts carries the interstitial."
+                echo "::error::Blocked (exit 3) WITH a dedicated proxy exit in play. That is no longer an access condition this workflow cannot control — either Cloudflare's rules for this site have changed, or the exit itself is already rate-scored. The debug dump in the artefacts carries the interstitial."
                 exit 1
               fi
               tested=false
-              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner, with no QUORA_PROXY secret set. Cloudflare's challenge on this site tracks the address's recent request rate, and a shared datacentre address is the worst case for that — so this says nothing about this code and the run is not failed. It also means the site-side check did NOT happen today. Set QUORA_PROXY to make this canary real."
+              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner, with no QUORA_PROXY secret set. Cloudflare's challenge on this site tracks the address's recent request RATE, and a shared runner's rate is not something this workflow controls — so this says nothing about this code and the run is not failed. It also means the site-side check did NOT happen today. Set QUORA_PROXY to make this canary real."
               echo "### Canary did NOT test anything (exit 3, blocked)" >> "$GITHUB_STEP_SUMMARY"
-              echo "A bare runner address met Cloudflare's managed challenge. The parser was not exercised. Set a \`QUORA_PROXY\` secret to give this canary a residential exit; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "A bare runner address met Cloudflare's managed challenge. The parser was not exercised. Set a \`QUORA_PROXY\` secret to give this canary an exit whose request rate it controls; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
             6)
               tested=false
               echo "::warning::Partial run (exit 6). The commonest cause here is a scroll batch being refused: the HTML keeps answering 200 while POST /graphql is refused. canary_question.meta.json carries the stop_reason. Not failed, because that is an access condition — but if it repeats every day, suspect the card anchor instead."

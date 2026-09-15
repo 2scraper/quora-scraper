@@ -69,8 +69,9 @@ metadata, no tests and no exit-code contract; none of that code survives.
   hours from one address, a 45-minute rest included), and no captcha solve is
   ever attempted on it.
 - **No paid product is required to get data**: 8 of the first 14 fetches from
-  an ordinary residential address with no key and no proxy were served in
-  full. Keeping it up is what costs — see the rate note above.
+  an ordinary DATACENTRE address with no key and no proxy were served in
+  full — a stronger result than a residential one would have been, since
+  datacentre ranges are what a bot manager scores first. Keeping it up is what costs — see the rate note above.
 - **A question page carries OTHER questions' answers**: related ones behind a
   badge rendered inside the title node, and merged duplicates behind an
   "Originally Answered:" banner. Both are read structurally, because both

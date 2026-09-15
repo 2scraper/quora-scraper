@@ -42,7 +42,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
 * **The block is Cloudflare's managed challenge, and the address's recent
   RATE is what decides.** HTTP 403, `cf-mitigated: challenge`, "Just a
   moment...", `cType: 'managed'`, and no sitekey — so there is nothing to pay
-  a solver for. Measured 2026-09-15 from one residential exit: the first
+  a solver for. Measured 2026-09-15 from one datacentre exit: the first
   fourteen fetches were 8 served and 6 challenged, each of those clearing on
   the next attempt about a minute later; everything after that — about thirty
   attempts over three hours, a 45-minute rest included, and `es.quora.com`
@@ -100,7 +100,7 @@ logger = logging.getLogger("playwright_scraper")
 # omission. A sibling site reads the CLIENT before the address and refuses a
 # bundled Chromium outright; Quora does not. Playwright's own Chromium was
 # served HTTP 200 and the full feed on every fetch that was not challenged —
-# eight of the first fourteen, from one residential exit on 2026-09-15 — and
+# eight of the first fourteen, from one datacentre exit on 2026-09-15 — and
 # the refusals were Cloudflare's managed challenge, which tracks the ADDRESS's
 # recent request rate rather than the browser build. Named here rather than at
 # the call site so the smoke suite can assert the three engines agree on it;

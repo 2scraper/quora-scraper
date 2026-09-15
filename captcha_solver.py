@@ -34,7 +34,8 @@ links before paying, `page_flow.SOLVES_PER_PAGE` caps a page at one
 purchase, and `page_flow.STATE_POLICY` — not this file — decides which state
 is worth money at all.
 
-There is deliberately no DataDome path here. See "No DataDome solver" below.
+There is deliberately no solver for Cloudflare's managed challenge here, and
+none is possible: see "What is deliberately NOT here" at the end of this file.
 
 Flow:
   1. Both detectors run and are reconciled (see reconcile_detections) to decide
@@ -172,7 +173,7 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
        data-sitekey="..." data-action="..."), with the actual execute()
        call happening inside a bundled JS file, never appearing as
        readable inline script text at all — confirmed live on the sibling
-       farfetch-scraper repo's target, in its sign-up modal, via DevTools
+       a sibling repo's target, in its sign-up modal, via DevTools
        inspection. A previous version of this
        function, which only checked for format 1, reported "no captcha"
        on this exact page despite one being genuinely present — caught by
@@ -222,7 +223,7 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
 
 # ---------------------------------------------------------------------------
 # Runtime detection (added 2026-08-24 — the static-HTML detector below no
-# longer matched the sibling farfetch-scraper repo's target)
+# longer matched a sibling repo's target)
 # ---------------------------------------------------------------------------
 #
 # What changed there: the sign-up modal used to render
@@ -443,10 +444,11 @@ def reconcile_detections(html_challenge: Optional[CaptchaChallenge],
     passes one. An empty action fits a v2-invisible widget wearing a stale
     v3 label better than it fits working v3.
 
-    (Also worth knowing: the same modal served to a European residential IP
-    the same day had NO `<captcha-widget>` element at all — just the
-    `render=explicit` loader. That site served more than one variant of this
-    modal, so neither detector alone is enough.)
+    (Quora's own version of that asymmetry, measured 2026-09-15: every page
+    it serves carries Turnstile's `api.js?render=explicit` loader in the head
+    and an EMPTY `cf-turnstile-response` input inside a 0x0 fixed div. A
+    static-HTML detector sees a widget declared; a runtime detector sees
+    nothing rendered. Both are right, and only reconciling them says so.)
     """
     if runtime_challenge and not html_challenge:
         return runtime_challenge
@@ -716,21 +718,23 @@ solve_recaptcha_v3 = solve_recaptcha
 # ===========================================================================
 # What is deliberately NOT here
 # ===========================================================================
-# The sibling repo in this family carries a whole second solver for its
-# site's OWN first-party image captcha ("Enter the characters you see below",
-# a JPEG of distorted text and a GET form). Roughly 190 lines of it, and none
-# of it is ported here, because this site has no such page.
+# A sibling repo in this family carries a whole second solver for its site's
+# OWN first-party image captcha ("Enter the characters you see below", a JPEG
+# of distorted text and a GET form). Roughly 190 lines of it, and none of it
+# is ported here, because this site has no such page.
 #
-# What this site does instead is refuse a HEADLESS browser. Measured
-# 2026-09-10 from five different addresses, four of them residential: Akamai
-# answers with HTTP 403 and a 394-byte "Access Denied" page carrying a
-# reference id — no form, no image, no widget, nothing for a solver to
-# answer. And the trigger is the CLIENT rather than the address: the very
-# same addresses were served HTTP 200 and the full catalogue by a browser
-# with a real window. So the response to a block here is `--headful` or
-# `--cdp-endpoint`, not a solve and not a better proxy, and
-# product_parser.detect_page_state reports it as "blocked" rather than
-# "challenge" precisely so no solve is attempted and nothing is charged.
+# What Quora does instead is serve Cloudflare's MANAGED challenge, and the
+# distinguishing thing about a managed challenge is that there is nothing in
+# it to answer. Measured 2026-09-15 on the one it served: `cType: 'managed'`
+# in its own config, 0 `data-sitekey` attributes, 0 Turnstile iframes, no
+# form and no image. A solver takes a sitekey and a page URL; this page
+# publishes neither.
+#
+# So the response to a block here is a retry, a rest or a different exit —
+# never a purchase — and `page_flow.STATE_POLICY` marks `challenge` as
+# retry-but-do-not-solve precisely so nothing is attempted and nothing is
+# charged. The retry is measured to work while the address is rested and
+# measured NOT to while it is busy; see that file for the numbers.
 #
 # The reCAPTCHA / hCaptcha / Turnstile machinery above IS kept, and that is a
 # deliberate asymmetry rather than an inconsistency. Detection stays broad
