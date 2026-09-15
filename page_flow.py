@@ -439,6 +439,54 @@ def answers_expected(html: Optional[str]) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
+# The feed's length is decided at LOAD, not by scrolling
+# ---------------------------------------------------------------------------
+# §8's third case, measured on this site: "a different page was served to
+# this SESSION — no amount of waiting or scrolling helps".
+#
+# Four loads of the SAME question URL, 2026-09-15, same machine, same
+# browser build, minutes apart:
+#
+#     cards at first paint   5      13      5      12
+#     after scrolling to the bottom and waiting 20s
+#                            5      13    259      12
+#
+# In the 5- and 13-card sessions the scroll worked — `scrollY` reached the
+# document's end and stayed there — and Quora simply never fetched more. In
+# the 259 one it did. So how much of a question you get is decided when the
+# page loads, and a short run is not a broken scroll.
+#
+# What that means for a caller: re-run it. A fresh browser re-rolls the
+# variant. What it means for this module: the scroll loop settling early is
+# CORRECT behaviour and must not be made more patient to chase it — more
+# rounds against a session that is not going to extend just spends time.
+#
+# So this is reported rather than fought, and the threshold is deliberately
+# generous: a question page legitimately renders a fraction of a large
+# question, and the warning is for the case where the fraction is tiny.
+SHORT_FEED_SHARE = 0.10
+
+
+def short_feed_warning(rows: int, available: Optional[int]) -> Optional[str]:
+    """A warning when this session was served a much shorter feed than most.
+
+    None when there is nothing to say — which includes every topic and
+    profile run, because only a question page states a total.
+    """
+    if not available or available <= 0 or rows <= 0:
+        return None
+    if rows >= available * SHORT_FEED_SHARE:
+        return None
+    return (f"This session was served {rows} of the question's {available} "
+            f"answers and scrolling did not extend it. That is a property of "
+            f"the SESSION rather than of the scroll: four loads of one "
+            f"measured question gave 5, 13, 12 and 259 answers, and in the "
+            f"short ones the scroll reached the bottom and the site simply "
+            f"never fetched more. A fresh browser re-rolls it — re-run, and "
+            f"prefer the run that got more.")
+
+
+# ---------------------------------------------------------------------------
 # Concurrency
 # ---------------------------------------------------------------------------
 def concurrency_limit(url: str = "") -> Optional[int]:

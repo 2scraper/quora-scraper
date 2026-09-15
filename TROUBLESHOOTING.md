@@ -120,11 +120,15 @@ page renders twelve answers and reports 253; Quora extends it on scroll. That
 number sits *beside* the row count rather than being subtracted from it,
 precisely so it is not read as a gap.
 
-**`stop_reason` is `no_new_products` after one batch.** The feed stopped
-growing. On a small profile that is the real end. On a large topic it usually
-means the scroll did not reach the trigger — raise `--pages` and check the
-`scroll` trace in the sidecar, which records the card count at first paint and
-after scrolling.
+**`stop_reason` is `no_new_products` after one batch, and the row count is a
+handful.** The SESSION was served a short feed. Measured: four loads of one
+question URL gave 5, 13, 12 and 259 answers, and in the short ones the scroll
+reached the bottom of the document and Quora never fetched more. Raising
+`--pages` does not help and the run says so. **Re-run it** — a fresh browser
+re-rolls the variant.
+
+**`stop_reason` is `no_new_products` on a profile.** Usually the real end: a
+profile has as many answers as its author wrote.
 
 **`stop_reason` is `next_batch_refused` and the status is `partial`
 (exit 6).** The batch behind the scroll was refused by the site while the HTML

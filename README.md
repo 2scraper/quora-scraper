@@ -61,7 +61,7 @@ than one.
 
 ---
 
-## The five things that will surprise you
+## The six things that will surprise you
 
 ### 1. `--pages` counts scroll batches, not addresses
 
@@ -143,7 +143,25 @@ never attempts a solve on it and never charges you for one.
 If a run exits 3, the interstitial is saved beside your output as
 `<out>_page<N>_debug.html` with a screenshot next to it.
 
-### 4. A Space or a Quora Session answer lives on its own subdomain
+### 4. How many answers you get is decided at LOAD, not by scrolling
+
+Four loads of the same question URL, minutes apart, same machine, same
+browser build:
+
+| | | | |
+|---|---|---|---|
+| cards at first paint | 5 | 13 | 5 |
+| after scrolling to the bottom and waiting 20s | 5 | 13 | **259** |
+
+In the short sessions the scroll worked — `scrollY` reached the document's end
+and stayed there — and Quora simply never fetched more. So a run that comes
+back with six rows out of a question's stated 253 is **not** a broken scroll,
+and no amount of extra patience will fix it.
+
+**Re-run it.** A fresh browser re-rolls the variant. The run warns when it
+sees this, rather than quietly reporting a short result as a complete one.
+
+### 5. A Space or a Quora Session answer lives on its own subdomain
 
 Four of one profile's eighteen answer permalinks were on
 `{session}.quora.com`, with **no `/answer/` segment at all** — which is the
@@ -164,7 +182,7 @@ So `question_url` is exact when the payload reached the row and is the
 permalink itself otherwise — a stated approximation rather than a guess
 dressed up as a reading.
 
-### 5. Traps that look like bugs
+### 6. Traps that look like bugs
 
 - **`answer_count` is much larger than the rows you got.** One question page
   renders twelve answers and reports 253. That is Quora rendering a fraction
@@ -274,7 +292,7 @@ tolerance never absorbs.
 | `playwright_scraper.py` | Playwright | **primary.** The only one with `--fingerprint` and `--locale`. |
 | `selenium_scraper.py` | Selenium + chromedriver | Cannot authenticate a proxy, and cannot use an authenticated CDP endpoint. |
 | `puppeteer_scraper.py` | pyppeteer | Parity engine. pyppeteer is effectively unmaintained and its own README points at Playwright. |
-| `scraper_api_client.py` | 2Captcha Scraper API | One HTTP request, no local browser. **Not yet run against this site** — see its docstring. |
+| `scraper_api_client.py` | 2Captcha Scraper API | One HTTP request, no local browser. **The richest path per row on a question URL** and useless on a topic one — see below. |
 
 All three browser engines share `product_parser.py`, `page_flow.py`,
 `output_writer.py`, `proxy_pool.py` and `captcha_solver.py`, so they agree on
@@ -299,6 +317,30 @@ Known limits, stated rather than left to be discovered:
 
 ---
 
+## The four paths, measured against each other
+
+All four read the same rows into the same columns. What differs is how many
+rows and how much of each, and on this site the difference is larger than
+usual — measured 2026-09-15 on the same question URL:
+
+| path | rows | payload-backed | cost |
+|---|---|---|---|
+| a browser engine, 1 scroll batch | 260 | 6 | free |
+| Scraper API, one request | 6 | **6 of 6** | $0.0005 |
+
+The API returns the SERVED response, so every row it produces comes out of
+Quora's inlined payload with its upvote count, view count, creation time,
+numeric ids and full text. A browser engine reaches forty times as many rows
+and reads almost all of them off cards, which carry none of those columns.
+
+On a TOPIC url the API returns **nothing at all** — 99,833 bytes, 3 inline
+payloads, 0 answer objects, 0 cards — because a topic's answers arrive over a
+later XHR. `--wait-element 'a.answer_timestamp'` does not help: the same URL
+took sixteen seconds instead of three and came back with the same shell.
+
+So: the API for a question read in depth-of-columns, a browser engine for a
+topic feed or for breadth of rows.
+
 ## Do you need any of the paid products?
 
 **Not to get started.** Playwright's own bundled Chromium, from an ordinary
@@ -320,6 +362,7 @@ fetch a little of it for free.
 | [Proxies](https://2captcha.com/proxy) | spreads the request rate across addresses, which is the real limit |
 | [Scraping Browser API](https://2captcha.com) | a remote browser over CDP, with persistent profiles — no browser infrastructure of your own |
 | [Fingerprints](https://2captcha.com) | a consistent device identity across runs |
+| [Scraper API](https://2captcha.com) | a question's answers in one request, with every column populated, for $0.0005 — measured. Not a topic feed: see the table below. |
 | [Captcha solving](https://2captcha.com) | **nothing on this site.** Quora's refusal is a *managed* Cloudflare challenge with no sitekey; there is nothing to solve. The detector is kept because a rendered challenge is possible and a scraper that cannot name what stopped it is much harder to fix. |
 
 All four sit behind one key. Put it in `.env` (see `.env.example`) rather than

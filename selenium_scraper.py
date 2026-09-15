@@ -222,10 +222,23 @@ class _Session:
         self.driver.set_script_timeout(SCRIPT_TIMEOUT)
 
     def _apply_fingerprint(self):
-        from fingerprint_client import get_fingerprint, playwright_init_script
+        # THROUGH THE SHARED HELPER, never by reaching into the response
+        # shape here. This line dug the UA out of the response itself until a
+        # live call to the API showed what it actually returns: the UA is at
+        # `userAgent.userAgent` in the chromium format and at `data.ua` in
+        # the raw one, and the key this engine asked for exists in NEITHER.
+        # So `--fingerprint`
+        # silently set no user agent at all and the browser kept its own —
+        # which defeats the flag rather than breaking it, because the run
+        # then presents a Windows fingerprint's screen, locale and timezone
+        # over a local Chromium's UA. That is the identity MISMATCH the flag
+        # exists to avoid (§16, where the same defect was live in four
+        # sibling repos at once).
+        from fingerprint_client import (get_fingerprint, fingerprint_user_agent,
+                                        playwright_init_script)
         fp = get_fingerprint(self.args.twocaptcha_key, tags=self.args.fp_tags,
                              country=self.args.fp_country)
-        ua = (fp.get("userAgent") or {}).get("value")
+        ua = fingerprint_user_agent(fp)
         script = playwright_init_script(fp)
         try:
             if ua:
@@ -785,6 +798,9 @@ def scrape(args) -> int:
         logger.info("The question states it has %d answer(s); this run took "
                     "%d (%.1f%%).", answers_available, len(all_rows),
                     100.0 * len(all_rows) / answers_available)
+        short = page_flow.short_feed_warning(len(all_rows), answers_available)
+        if short:
+            logger.warning("%s", short)
     if all_rows:
         enriched = sum(1 for r in all_rows if r.data_source != "dom")
         logger.info("Inline-payload coverage over the merged run: %d/%d "

@@ -6,40 +6,40 @@ One HTTP request per page, no local browser, no Playwright install. The
 the HTML; this client parses it with the same `product_parser` the browser
 engines use, so the rows and columns are identical.
 
-NOT YET RUN AGAINST THIS SITE
------------------------------
-Every other claim in this repo is a measurement. This one is not: the path
-has not been exercised against Quora, because no working 2Captcha credential
-was available when the repo was written. It is shipped because the client is
-family code and the parser it calls IS measured — but nothing here should be
-read as a promise about what the API returns, and the README says the same.
-The sibling repos' numbers do not transfer: what a one-shot fetch gets
-depends entirely on how much of the page the site renders on the server, and
-Quora renders NONE of it.
+WHAT IT GETS, AND WHAT IT CANNOT GET — measured 2026-09-15, $0.0005 a request
+-----------------------------------------------------------------------------
+This path is unusually good on one URL kind and useless on another, and the
+reason is the same fact that shapes the whole repo: Quora renders nothing on
+the server, but it does inline its own GraphQL results into the response.
 
-What IS known, from the captures rather than from this client:
+    a QUESTION url    HTTP 200, 264,581 bytes
+                      6 answers, 6 of 6 payload-backed
+                      upvotes, views, creationTime, numeric ids and the FULL
+                      answer text all populated
 
-    0 occurrences of Quora's own `q-box` class in a raw response body
-    0 `application/ld+json` blocks anywhere
-    16 inline GraphQL payloads in a QUESTION page's raw body, carrying five
-      answers with their numeric ids, full text, upvotes and view counts
-    3 inline payloads in a TOPIC page's raw body, carrying no answers at all
+    a TOPIC url       HTTP 200, 99,833 bytes
+                      3 inline payloads carrying 0 Answer objects
+                      0 rendered cards -> 0 rows, classified `shell`
 
-So the shape to expect is the mirror image of a sibling site's: a one-shot
-fetch of a QUESTION URL should return rows with the richest columns this
-repo has, because they come out of the served payload rather than the DOM —
-and the same fetch of a TOPIC URL should return nothing at all, because a
-topic's answers arrive over a later XHR that no one-shot fetch performs.
+So it is the RICHEST path this repo has, per row, on a question page — better
+than a browser engine's first batch, which reads most of its rows off cards
+that carry none of those columns. And it cannot read a topic feed at all,
+because a topic's answers arrive over a later XHR and this returns the served
+response rather than a rendered DOM.
 
-`--wait-element` is what would change the second case, by making the API's
-own browser wait for the feed to paint:
+`--wait-element` does not change that, which was worth checking rather than
+assuming: the same topic URL with `--wait-element 'a.answer_timestamp'` spent
+sixteen seconds instead of three and returned the same 99,847-byte shell with
+the same 0 cards. Whatever the API waits on, it is not handing back the
+hydrated document.
 
-    --wait-element 'a.answer_timestamp'
+What is missing on both is any completeness oracle — but the browser path has
+none either, because Quora publishes no per-page counter anywhere (see
+`page_flow.page_gap`). The difference is that a browser engine can keep
+scrolling and this cannot.
 
-There is no completeness oracle on this path, and there is none on the
-browser path either — Quora publishes no per-page counter anywhere (see
-`page_flow.page_gap`). So neither path can tell you what it did not get; the
-browser engines can at least keep scrolling.
+So: reach for this when you want a question's answers cheaply and in full, and
+use a browser engine when you want a topic feed or more than the first batch.
 
     python3 scraper_api_client.py \\
         --url "https://www.quora.com/What-is-machine-learning-4"
@@ -270,12 +270,12 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 def parse_args():
     p = argparse.ArgumentParser(
         description="Quora answer scraper — 2captcha Scraper API edition "
-                    "(no local browser). NOT YET RUN against this site: see "
-                    "this file's docstring. Quora renders no content on the "
-                    "server, so a QUESTION URL should yield rows out of the "
-                    "inline payload while a TOPIC URL needs --wait-element "
-                    "to yield anything at all. Prefer playwright_scraper.py "
-                    "for a full feed.")
+                    "(no local browser). Measured: a QUESTION url yields 6 "
+                    "answers with every column populated for $0.0005, and a "
+                    "TOPIC url yields ZERO — with or without --wait-element — "
+                    "because a topic's answers arrive over a later XHR and "
+                    "this returns the served response. Use a browser engine "
+                    "for a topic feed.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
@@ -283,12 +283,11 @@ def parse_args():
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
-                   help="A Quora topic, question or profile URL. On a topic "
-                        "URL pass --wait-element 'a.answer_timestamp' with "
-                        "it: the feed arrives over client-side GraphQL, so a "
-                        "fetch that does not render returns a shell with no "
-                        "cards in it. Required, unless QUORA_URL is set in "
-                        "the environment or in .env.")
+                   help="A Quora question or profile URL. A TOPIC url "
+                        "returns nothing here — measured, and --wait-element "
+                        "does not help — because a topic's answers arrive "
+                        "over a later XHR. Required, unless QUORA_URL is set "
+                        "in the environment or in .env.")
     p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="quora_answers_scraperapi", help="Output file prefix")

@@ -782,6 +782,9 @@ def scrape(args) -> int:
         logger.info("The question states it has %d answer(s); this run took "
                     "%d (%.1f%%).", answers_available, len(all_rows),
                     100.0 * len(all_rows) / answers_available)
+        short = page_flow.short_feed_warning(len(all_rows), answers_available)
+        if short:
+            logger.warning("%s", short)
     if all_rows:
         enriched = sum(1 for r in all_rows if r.data_source != "dom")
         logger.info("Inline-payload coverage over the merged run: %d/%d "

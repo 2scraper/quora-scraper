@@ -45,7 +45,7 @@ metadata, no tests and no exit-code contract; none of that code survives.
 - Proxy pool with rotation, credential masking and argv safety;
   `.env` loading via `env_config.py`; 2Captcha fingerprint support on the
   Playwright and Selenium engines.
-- An offline suite of 450+ checks that passes with no engine library
+- An offline suite of 500+ checks that passes with no engine library
   installed, fixtures cut from real captures and proven to parse identically
   to them, a daily two-run canary, and a Docker image built and exercised in
   CI.
@@ -64,17 +64,46 @@ metadata, no tests and no exit-code contract; none of that code survives.
   are null on every topic row.
 - **The block is Cloudflare's managed challenge** — HTTP 403,
   `cf-mitigated: challenge`, `cType: 'managed'`, no sitekey anywhere. It
-  clears on retry, it tracks the address's recent request rate (one-in-four
-  rising to three-in-three over twenty minutes from one address), and no
-  captcha solve is ever attempted on it.
-- **No paid product is required to get data**: 8 of 14 fetches from an
-  ordinary residential address with no key and no proxy were served in full.
+  clears on retry while the address is rested and stops clearing once it is
+  busy (8 of the first 14 fetches served, then 0 of the next ~30 across three
+  hours from one address, a 45-minute rest included), and no captcha solve is
+  ever attempted on it.
+- **No paid product is required to get data**: 8 of the first 14 fetches from
+  an ordinary residential address with no key and no proxy were served in
+  full. Keeping it up is what costs — see the rate note above.
+- **A question page carries OTHER questions' answers**: related ones behind a
+  badge rendered inside the title node, and merged duplicates behind an
+  "Originally Answered:" banner. Both are read structurally, because both
+  labels are localised across twenty-four language sites.
+
+### The paid paths, run rather than assumed (§16)
+
+- **Captcha solving**: the key works (balance read live), and there is
+  nothing on this site to spend it on — see above.
+- **Fingerprint API**: works, and running it found a real defect. The
+  Selenium engine read the user agent from a key the API returns in NEITHER
+  of its two formats, so `--fingerprint` there set no UA at all and presented
+  a Windows fingerprint's screen, locale and timezone over a local Chromium's
+  UA. That is the identity MISMATCH the flag exists to avoid, and it is the
+  same defect §16 records as having been live in four sibling repos. Fixed,
+  routed through the shared helper, and asserted for all three engines.
+- **Scraper API**: works, and is the richest path per row this repo has on a
+  QUESTION url — 6 answers, 6 of 6 payload-backed, every column populated,
+  $0.0005. On a TOPIC url it returns nothing at all, with or without
+  `--wait-element`, because a topic's answers arrive over a later XHR and the
+  API returns the served response rather than a rendered DOM.
+- **Proxies** and the **Scraping Browser**: NOT verified. The credentials
+  available refused every format on both proxy ports and returned 401 on the
+  Scraping Browser endpoint, which is an account/zone matter rather than
+  anything in this code.
 
 ### Known limitations
 
-- `scraper_api_client.py` has **not been run against this site**. It ships
-  because the client is family code and the parser it calls is measured, but
-  nothing about its behaviour here is claimed.
+- **How many answers a question page gives you is decided at LOAD.** Four
+  loads of one URL gave 5, 13, 12 and 259, and in the short ones the scroll
+  reached the document's end and Quora never fetched more. A short run is a
+  short SESSION, not a broken scroll; re-running re-rolls it, and the run
+  warns rather than reporting a short result as a complete one.
 - Selenium cannot authenticate a proxy, and cannot use an authenticated CDP
   endpoint. Both are reported loudly rather than silently half-working.
 - `--fingerprint` and `--locale` exist on Playwright and Selenium and not on

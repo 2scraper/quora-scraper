@@ -57,6 +57,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import captcha_solver
 import env_config
+from fingerprint_client import (fingerprint_user_agent,
+                                playwright_context_kwargs)
 import page_flow
 import product_parser
 from diff_runs import diff_products
@@ -1145,6 +1147,70 @@ def test_env_config():
     return ok
 
 
+def test_fingerprint_is_read_through_the_shared_helper():
+    group("--fingerprint reads the UA through ONE helper (§16)")
+    ok = True
+    # The defect this pins was live in FOUR sibling repos at once and was
+    # live here too, in the Selenium engine, until a live call to the API
+    # showed what it returns. The UA is at `userAgent.userAgent` in the
+    # chromium format and at `data.ua` in the raw one; `userAgent.value` —
+    # which that engine read — exists in NEITHER. So `--fingerprint` set no
+    # user agent at all, silently, and the run presented a Windows
+    # fingerprint's screen, locale and timezone over a local Chromium's UA.
+    # That is the identity MISMATCH the flag exists to avoid.
+    for engine in ENGINES:
+        source = _engine_source(engine)
+        if source is None:
+            continue
+        if "fingerprint" not in source:
+            continue
+        ok &= check(f"{engine} does not reach into the response shape itself",
+                    'get("userAgent")' not in source
+                    and '["userAgent"]' not in source)
+
+    # And the helper itself, against the three shapes the API is known to
+    # return. Fixtures rather than a live call: the suite must pass offline.
+    ok &= check("chromium format: userAgent.userAgent",
+                fingerprint_user_agent({"userAgent": {"userAgent": "UA-1"}}) == "UA-1")
+    ok &= check("raw format: data.ua",
+                fingerprint_user_agent({"data": {"ua": "UA-2"}}) == "UA-2")
+    ok &= check("a bare string is accepted too",
+                fingerprint_user_agent({"userAgent": "UA-3"}) == "UA-3")
+    ok &= check("and `value`, which the API does NOT return, is still read "
+                "rather than being made an error — a response shape this "
+                "repo has not seen is not a reason to set no UA",
+                fingerprint_user_agent({"userAgent": {"value": "UA-4"}}) == "UA-4")
+    ok &= check("nothing recognisable -> None, never a fabricated UA",
+                fingerprint_user_agent({"userAgent": {}}) is None)
+
+    group("Its kwargs are ones the driver actually accepts (§10)")
+    # An unknown key in new_context(**kwargs) is a TypeError at launch, on
+    # the paid path, at runtime.
+    fp = {"userAgent": {"userAgent": "UA"},
+          "screen": {"width": 1920, "height": 1080},
+          "intl": {"contentLocale": "en-US", "timeZone": "America/New_York"}}
+    kwargs = playwright_context_kwargs(fp)
+    try:
+        from playwright.sync_api import Browser
+        allowed = set(inspect.signature(Browser.new_context).parameters)
+        unknown = sorted(set(kwargs) - allowed)
+        ok &= check(f"every context kwarg is a real one "
+                    f"{'' if not unknown else unknown}", not unknown)
+    except ImportError:
+        skips_note = "playwright absent, context-kwarg binding not checked"
+        ok &= check(skips_note, True)
+
+    # The locale must come from the fingerprint, not be built out of its
+    # country: a sibling family shipped `en-{country}` and gave every German
+    # fingerprint the locale `en-DE`, which is not a locale anyone has.
+    ok &= check("locale comes from the fingerprint's own intl block",
+                kwargs.get("locale") == "en-US")
+    ok &= check("and so does the timezone, which was never applied at all "
+                "in four sibling repos",
+                kwargs.get("timezone_id") == "America/New_York")
+    return ok
+
+
 def test_proxy_pool():
     group("Credentials never reach argv or a log")
     ok = True
@@ -1753,7 +1819,7 @@ def test_readme_claims():
 # count, because an exact count goes stale the next time anyone adds a check
 # and a stale number in a README is worse than no number (§17). Raise it when
 # it is comfortably passed; it can only ever be an under-claim.
-CLAIMED_CHECK_FLOOR = 460
+CLAIMED_CHECK_FLOOR = 500
 
 
 def main() -> int:
@@ -1774,6 +1840,7 @@ def main() -> int:
     ok &= test_writers_and_finish_run()
     ok &= test_diff()
     ok &= test_env_config()
+    ok &= test_fingerprint_is_read_through_the_shared_helper()
     ok &= test_proxy_pool()
     ok &= test_credentials_never_reach_a_log()
     ok &= test_engine_parity(skips)
