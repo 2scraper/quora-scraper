@@ -959,6 +959,25 @@ def test_writers_and_finish_run():
         code, meta = run([], "completed")
         ok &= check("empty and not blocked is exit 4", code == EXIT_NO_PRODUCTS)
 
+        # THE DISTINCTION A LIVE DEAD PROXY FOUND. Zero rows has three
+        # causes and they are not the same thing (§8: blocked is not empty).
+        # This one used to return exit 4 — "ran fine, found nothing" — on a
+        # run that never reached the site at all, while the sidecar beside
+        # it correctly said `status: failed`, `pages_completed: 0`. A
+        # pipeline branching on the exit code, which is what this family
+        # says exit codes are for, would have recorded an empty catalogue.
+        code, meta = run([], "page_load_timeout", allow_empty=True)
+        ok &= check("0 rows because nothing was FETCHED is exit 6, not 4",
+                    code == EXIT_PARTIAL)
+        ok &= check("and the sidecar says failed, not complete",
+                    meta is not None and meta["status"] == "failed")
+        code, meta = run([], "next_batch_refused", allow_empty=True)
+        ok &= check("a refused batch with no rows is exit 6 too",
+                    code == EXIT_PARTIAL)
+        code, meta = run([], "blocked_cloudflare", blocked=True, allow_empty=True)
+        ok &= check("but a BLOCK still outranks both, at exit 3",
+                    code == EXIT_BLOCKED)
+
         group("The sidecar records WHICH pages failed, by number")
         out = os.path.join(tmp, "meta")
         finish_run(rows, out, "json", False, blocked=False,

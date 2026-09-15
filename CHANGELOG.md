@@ -93,10 +93,32 @@ metadata, no tests and no exit-code contract; none of that code survives.
   $0.0005. On a TOPIC url it returns nothing at all, with or without
   `--wait-element`, because a topic's answers arrive over a later XHR and the
   API returns the served response rather than a rendered DOM.
-- **Proxies** and the **Scraping Browser**: NOT verified. The credentials
-  available refused every format on both proxy ports and returned 401 on the
-  Scraping Browser endpoint, which is an account/zone matter rather than
-  anything in this code.
+- **Proxies**: the PATH is verified, the upstream is not. Two working
+  credentials were tried from this machine and both were refused at the
+  source — the SOCKS5 endpoint returns auth-failure for the given string, for
+  every variant of it, for the bare login AND for deliberately wrong
+  credentials, which means it is refusing the source rather than reading the
+  password; the HTTP endpoint accepts TCP and never answers. The same API key
+  authenticates fine from the same machine, so the account and the network
+  are not the issue. What that DID exercise, for the first time, is this
+  repo's own proxy handling: credentials masked in every log line, an
+  authenticated SOCKS5 URL refused up front with the reason rather than
+  silently stripped, and an unreachable exit reported as a failed run rather
+  than as a crash — which is where the exit-code fix below came from.
+- **Scraping Browser**: NOT verified. 401 on every zone tried, which is a
+  separate subscription rather than anything in this code.
+
+### Fixed
+
+- **Zero rows no longer always means exit 4.** An unreachable proxy produced
+  exit 4 — "ran fine, found nothing" — on a question with 253 answers, while
+  the sidecar beside it correctly said `status: failed`, `pages_completed:
+  0`. Zero rows has three causes and they are different things: blocked
+  (exit 3), never reached the site (exit 6), and the site's answer was
+  nothing (exit 4). A pipeline branching on the exit code, which is what
+  this family says exit codes are for, would have recorded an empty
+  catalogue. This is shared family code and the same mapping is in every
+  sibling repo.
 
 ### Known limitations
 

@@ -466,9 +466,30 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
             extra=extra))
 
     if not rows:
-        # Nothing gathered at all: a challenge outranks "empty result",
-        # because it says something stood between the run and the content.
-        return EXIT_BLOCKED if blocked else rc
+        # Nothing gathered at all, and WHY decides the code. The three
+        # answers are genuinely different things and a pipeline branches on
+        # them (§8: blocked is not empty is not partial):
+        #
+        #   blocked          something stood between the run and the content
+        #   did not complete we never reached the site — a dead proxy, a
+        #                    load timeout, a refused batch
+        #   completed        we asked, and the site's answer was nothing
+        #
+        # The middle one used to fall through to EXIT_NO_PRODUCTS, and that
+        # was measured rather than reasoned about: an unreachable proxy
+        # produced exit 4 — "ran fine, found nothing" — on a question with
+        # 253 answers, while the sidecar beside it correctly said
+        # `status: failed`, `pages_completed: 0`. A consumer branching on the
+        # exit code, which is what this family says exit codes are for, would
+        # have recorded an empty catalogue.
+        if blocked:
+            return EXIT_BLOCKED
+        if not complete:
+            print(f"[!] Failed run: 0 of {pages_requested} page(s) were "
+                  f"fetched ({stop_reason}). This is NOT an empty result — "
+                  f"nothing was read from the site at all.")
+            return EXIT_PARTIAL
+        return rc
     if not complete:
         print(f"[!] Partial run: stopped after {pages_completed} of "
               f"{pages_requested} page(s) ({stop_reason}). The output holds "
