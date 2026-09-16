@@ -12,7 +12,7 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-09-15
+## [0.1.0] — 2026-09-16
 
 First release on this scraper family's architecture. The repository
 previously held three standalone scripts with no shared schema, no run
