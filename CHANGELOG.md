@@ -12,6 +12,23 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The canary asserted a `title` floor of 100%, which this repo's own README
+  says is wrong.** A question page carries answers to other questions, and a
+  few of those name their question nowhere on the page; a null there is the
+  honest answer and inventing one from the slug would be a guess. Measured
+  252 of 260 on a live run, so the floor is 0.90. Caught by the canary's
+  second dispatch — a canary failing on its own repo's documented behaviour
+  is it working.
+
+### Added
+
+- The canary now asserts the two title regressions a live run found, neither
+  of which a coverage number can see: no title carries the "Related" badge
+  Quora renders inside the title node, and no row wears the page's own
+  question while answering a different one.
+
 ## [0.1.1] — 2026-09-16
 
 The canary's first dispatch, run without a proxy secret exactly as §15 says
