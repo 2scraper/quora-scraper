@@ -135,10 +135,25 @@ Three things follow:
 So `--delay` is the cheapest lever, `--proxy-file` is the one that scales, and
 "it worked an hour ago" is not evidence that it will work now.
 
-And one thing that follows for your wallet: a **managed** challenge carries no
-sitekey — 0 `data-sitekey` attributes and 0 Turnstile iframes on the one
-measured — so there is nothing for a captcha solver to answer. This scraper
-never attempts a solve on it and never charges you for one.
+And one thing that follows for your wallet, stated precisely because it
+decides whether a 2Captcha key would help you here. A **managed** challenge
+carries no sitekey **in the markup** — 0 `data-sitekey` attributes and 0
+Turnstile iframes on the one measured. That is a fact about the markup and
+not about the challenge: Cloudflare passes `sitekey`, `action`, `cData` and
+`chlPageData` to `turnstile.render()` once and keeps nothing, so no static
+read of the HTML can build a solvable task, however careful it is. Those
+arguments can be captured with an init script installed on the context before
+any page script runs, and 2Captcha solves what comes out as
+`TurnstileTaskProxyless`.
+
+**This repo does not implement that interception.** The reason is the
+measurement above rather than any limit of the solver: what gates this site
+is the address's recent request RATE, so a solved challenge buys one page
+from an address that is about to be challenged again, while `--delay` and
+`--proxy-file` change the thing actually being measured. So this scraper
+never attempts a solve on a challenge and never charges you for one. If you
+need the interception on a site where a token is worth buying,
+`foodpanda-scraper` in this family implements it.
 
 If a run exits 3, the interstitial is saved beside your output as
 `<out>_page<N>_debug.html` with a screenshot next to it.

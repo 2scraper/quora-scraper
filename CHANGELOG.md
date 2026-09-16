@@ -12,7 +12,25 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+> **Correction to a claim in earlier READMEs.** They said a managed
+> Cloudflare challenge "carries no sitekey … so there is nothing for a
+> captcha solver to answer". The measurement was right and the conclusion was
+> not. Cloudflare passes `sitekey`, `action`, `cData` and `chlPageData` to
+> `turnstile.render()` once and keeps nothing, so the absence is a fact about
+> the MARKUP; the arguments can be captured with an init script and 2Captcha
+> solves the result as `TurnstileTaskProxyless`. The sentence read as "a
+> 2Captcha key would not help you here", which is a claim about the product
+> and was wrong.
+
 ### Fixed
+
+- **README no longer says a challenge has nothing for a solver to answer.**
+  Every measurement is unchanged. What changed is the reason this scraper
+  does not solve one, which is now stated and is specific to this site: what
+  gates Quora is the address's recent request RATE, so a token buys one page
+  from an address about to be challenged again, while `--delay` and
+  `--proxy-file` move the thing actually being measured. The repo does not
+  implement the `turnstile.render` interception, and says so.
 
 - **The canary asserted a `title` floor of 100%, which this repo's own README
   says is wrong.** A question page carries answers to other questions, and a
@@ -23,6 +41,11 @@ bad default or violating the promise quietly.
   is it working.
 
 ### Added
+
+- **`test_captcha_capability_claims_match_the_code`** — fails the build on a
+  documented conclusion that a captcha cannot be solved, and equally on a
+  README claiming a Turnstile solve with no task type and no interception
+  behind it. Verified by control: restoring the old sentence turns it red.
 
 - The canary now asserts the two title regressions a live run found, neither
   of which a coverage number can see: no title carries the "Related" badge
