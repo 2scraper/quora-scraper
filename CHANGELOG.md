@@ -12,6 +12,41 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-09-16
+
+The canary's first dispatch, run without a proxy secret exactly as §15 says
+to, failed — and it was right to. Three fixes, all in the same area and all
+found by that one run.
+
+### Fixed
+
+> **A run can no longer crash on a page that navigates under it.** If you
+> scripted around exit 1 from this scraper, that path is gone: the same event
+> now reports exit 3 or 6 with a reason.
+
+- **`_count` crashed the Playwright engine.** A scroll batch was polling the
+  card count when the page navigated — Cloudflare's challenge can arrive at
+  any moment here — and Playwright raised `Execution context was destroyed,
+  most likely because of a navigation`. Exit 1, a crash, where the honest
+  answer was "blocked". Its two twins had guarded that call from the start;
+  this is the same shape as the refused-GraphQL threshold, where two engines
+  agreed and one did not.
+- **`_scroll_to_bottom` was unguarded in the same engine**, with the same
+  exposure. Found immediately by the check written for the first one.
+- **A feed that stopped growing because the page was REPLACED was reported as
+  `exhausted`** — a COMPLETE stop reason — so a run blocked halfway would
+  have claimed the listing ended, keeping its earlier batches and calling
+  them the whole thing (§7). All three engines now classify the current page
+  before drawing that conclusion, and report `blocked_mid_scroll` instead.
+
+### Added
+
+- A check that every driver primitive the scroll loop drives (`_count`,
+  `_page_height`, `_scroll_to_bottom`) catches its driver's error in all
+  three engines, asserted structurally from the AST so it needs no engine
+  library. Verified by reverting both fixes: it names the engine and the
+  primitive.
+
 ## [0.1.0] — 2026-09-16
 
 First release on this scraper family's architecture. The repository

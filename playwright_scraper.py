@@ -203,7 +203,27 @@ FIELD_FLOOR = 90
 # Playwright and pyppeteer take `() => expr`, so a shared module handing JS
 # across this boundary would quietly acquire one driver's dialect.
 def _count(page, selector: str) -> int:
-    return len(page.query_selector_all(selector))
+    """How many elements match, or 0 if the page moved under us.
+
+    GUARDED, like its twins in the other two engines, and the crash that
+    taught us why came from the canary's first dispatch: a scroll batch was
+    polling the card count when the page navigated — Cloudflare's challenge
+    can arrive at any moment on this site — and Playwright raised
+    `Execution context was destroyed, most likely because of a navigation`.
+    That left the run with exit 1, a CRASH, where the correct answer was
+    "blocked".
+
+    0 is the safe reading rather than a lie: every caller treats it as "no
+    cards seen this poll", which makes a readiness wait keep waiting and a
+    scroll batch report no growth — both of which are what actually happened.
+    The alternative, letting it propagate, turns a routine mid-poll
+    navigation into a traceback.
+    """
+    try:
+        return len(page.query_selector_all(selector))
+    except (PWError, PWTimeout) as e:
+        logger.debug("count(%s) failed: %s", selector, e)
+        return 0
 
 
 def _scroll_to_bottom(page) -> None:
@@ -217,8 +237,16 @@ def _scroll_to_bottom(page) -> None:
     fixed wheel stopped three rounds short of the bottom on a sibling site's
     7,600px grid, so the lazy-load trigger was never reached and a run took
     30 of 50 cards while looking settled (§8).
+
+    Guarded for the same reason `_count` is: the page can navigate mid-loop
+    on this site, and a scroll that raises turns a routine challenge into a
+    traceback. A failed scroll needs no report of its own — the next poll
+    sees the card count unchanged and the loop draws the right conclusion.
     """
-    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    try:
+        page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    except (PWError, PWTimeout) as e:
+        logger.debug("scroll failed: %s", e)
 
 
 def _page_height(page) -> Optional[int]:
@@ -735,9 +763,30 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                         page_flow.NEXT_BATCH_TIMEOUT_MS / 1000, refused,
                         args.delay)
                     return outcome
-                # Nothing refused and nothing new: the feed ran out. A
-                # complete answer, and on an infinite scroll the only one
-                # there is.
+                # Nothing refused and nothing new. Before calling that the
+                # end of the listing, ASK WHAT PAGE WE ARE ON: Cloudflare's
+                # challenge can arrive mid-scroll — it is what crashed this
+                # repo's first canary dispatch — and a feed that stopped
+                # growing because the page was replaced has not run out. The
+                # engines used to report that as `exhausted`, which is a
+                # COMPLETE stop reason, so a run that was blocked halfway
+                # would have claimed the feed ended (§7).
+                current = _content_when_settled(session.page) or ""
+                state_now = _classify(session.page, current)
+                if page_flow.counts_as_blocked(state_now):
+                    outcome.state = "blocked_mid_scroll"
+                    outcome.blocked_by = (detect_bot_challenge(current)
+                                          or "bot-challenge")
+                    outcome.final_url = session.page.url
+                    logger.error(
+                        "The feed stopped growing because the page was "
+                        "replaced: it is now %s. This is NOT the end of the "
+                        "listing — the batches already gathered are kept and "
+                        "the run is reported as partial rather than "
+                        "complete.", state_now)
+                    return outcome
+                # Ours, still served, and no more answers came. On an
+                # infinite scroll that is the only ending there is.
                 outcome.state = "exhausted"
                 outcome.final_url = session.page.url
                 return outcome

@@ -857,6 +857,15 @@ def test_throttle_is_not_completion():
                     '_GRAPHQL_PATH = "/graphql/"' in source)
         ok &= check(f"{engine} distinguishes exhausted from refused",
                     "no_turnover" in source and "exhausted" in source)
+        # And from a third ending the canary's first dispatch produced: the
+        # page being REPLACED mid-scroll. A feed that stopped growing because
+        # Cloudflare arrived has not run out, and `exhausted` is a COMPLETE
+        # stop reason — so without this a run blocked halfway would claim the
+        # listing ended.
+        ok &= check(f"{engine} checks WHAT PAGE it is on before calling the "
+                    f"feed exhausted",
+                    "blocked_mid_scroll" in source
+                    and "counts_as_blocked" in source)
     return ok
 
 
@@ -1288,6 +1297,59 @@ def test_credentials_never_reach_a_log():
     redacted = captcha_solver._redact(f"GET https://x/y?key={key} failed")
     ok &= check("the solver redacts a key from an error message",
                 key not in redacted)
+    return ok
+
+
+def test_driver_primitives_tolerate_a_navigation():
+    group("Every driver primitive survives the page moving under it")
+    ok = True
+    # The canary's FIRST dispatch caught this, which is exactly why §15 says
+    # to dispatch it once rather than trusting the badge. A scroll batch was
+    # polling the card count when the page navigated — Cloudflare's challenge
+    # can arrive at any moment here — and one engine raised
+    # `Execution context was destroyed, most likely because of a navigation`.
+    # Exit 1, a CRASH, where the honest answer was "blocked".
+    #
+    # Its two twins had guarded the same call from the start. That is the
+    # same shape as the refused-GraphQL threshold: two engines agree, one
+    # does not, and only a live run in a different environment shows it.
+    #
+    # Checked as TEXT so this needs no engine library, and by structure
+    # rather than by phrasing: the function must contain a try and a return
+    # of 0.
+    for engine in ENGINES:
+        source = _engine_source(engine)
+        if source is None:
+            continue
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name != "_count":
+                continue
+            guarded = any(isinstance(child, ast.Try) for child in node.body)
+            zero = any(isinstance(child, ast.Return)
+                       and isinstance(child.value, ast.Constant)
+                       and child.value.value == 0
+                       for child in ast.walk(node))
+            ok &= check(f"{engine}._count catches the driver's error", guarded)
+            ok &= check(f"{engine}._count answers 0 rather than raising", zero)
+            break
+        else:
+            ok &= check(f"{engine} has a _count primitive", False)
+
+    # The other primitives the scroll loop drives, for the same reason.
+    for engine in ENGINES:
+        source = _engine_source(engine)
+        if source is None:
+            continue
+        tree = ast.parse(source)
+        for name in ("_page_height", "_scroll_to_bottom"):
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == name:
+                    guarded = any(isinstance(c, ast.Try) for c in node.body)
+                    ok &= check(f"{engine}.{name} is guarded too", guarded)
+                    break
+            else:
+                ok &= check(f"{engine} has {name}", False)
     return ok
 
 
@@ -1929,6 +1991,7 @@ def main() -> int:
     ok &= test_fingerprint_is_read_through_the_shared_helper()
     ok &= test_proxy_pool()
     ok &= test_credentials_never_reach_a_log()
+    ok &= test_driver_primitives_tolerate_a_navigation()
     ok &= test_engine_parity(skips)
     ok &= test_module_attributes_exist(skips)
     ok &= test_no_dead_public_names()
