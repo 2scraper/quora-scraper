@@ -212,7 +212,18 @@ jobs:
 
           # Fully populated on every measured capture — 13/13 on the
           # question page, 30/30 and 18/18 on a topic and a profile.
-          for field, floor in (("title", 1.0), ("sku", 1.0), ("url", 1.0),
+          # `title` is 0.90, not 1.0, and the difference is documented
+          # behaviour rather than slack. A question page carries answers to
+          # OTHER questions, and a few of those name their question nowhere
+          # on the page — no title node, no "Originally Answered" banner. A
+          # null there is the honest answer; inventing one from the slug
+          # would be a guess. Measured 252 of 260 on a live run, so 0.90 is
+          # well under the real figure and far above a collapse.
+          #
+          # This floor was 1.0 until the canary's own second dispatch caught
+          # it disagreeing with the README — which is a canary doing its job
+          # on its own repo.
+          for field, floor in (("title", 0.90), ("sku", 1.0), ("url", 1.0),
                                ("question_url", 1.0), ("author", 0.95),
                                ("text", 0.95), ("text_chars", 0.95),
                                ("data_source", 1.0), ("mode", 1.0),
@@ -223,6 +234,33 @@ jobs:
               if rows and got / len(rows) < floor:
                   fail.append(f"{field} present on only {got}/{len(rows)} rows "
                               f"(floor {floor:.0%})")
+
+          # THE TWO TITLE REGRESSIONS, which a live run found and which no
+          # capture could show. A question page carries related questions
+          # behind a badge rendered INSIDE the title node, and merged
+          # duplicates behind an "Originally Answered:" banner. Reading the
+          # title node whole gave 29 rows titled "Related What is machine
+          # learning for?"; falling through to the page heading gave 27 rows
+          # confidently claiming a question they do not answer. Both are the
+          # 100%-populated-and-wrong column this family fears most, and
+          # neither shows up in a coverage number.
+          badged = [r.get("sku") for r in rows
+                    if (r.get("title") or "").startswith("Related")]
+          if badged:
+              fail.append(f"{len(badged)} title(s) still carry the 'Related' "
+                          f"badge: {badged[:3]}")
+
+          import collections
+          by_question = collections.Counter(r.get("question_url") for r in rows)
+          main_question = by_question.most_common(1)[0][0]
+          main_title = next((r.get("title") for r in rows
+                             if r.get("question_url") == main_question), None)
+          strays = [r.get("sku") for r in rows
+                    if r.get("question_url") != main_question
+                    and r.get("title") == main_title]
+          if strays:
+              fail.append(f"{len(strays)} row(s) wear the page's own question "
+                          f"while answering a different one: {strays[:3]}")
 
           # THE INLINE-PAYLOAD INVARIANT, and the reason this canary reads a
           # QUESTION url rather than a topic one. A question page carries
