@@ -227,10 +227,19 @@ proxy.
 
 Three ways out, best first:
 
-1. **2Captcha's IP-whitelist mode.** Whitelist your address, ask
-   `/proxy/generate_white_list_connections` for connections, and you get one
-   `host:port` per exit with **no credentials in them at all**. Those work in
-   every engine and drop straight into `--proxy-file`.
+1. **2Captcha's IP-whitelist mode.** Whitelist your address and ask
+   `/proxy/generate_white_list_connections` for connections; you get one
+   `host:port` per exit, which drops straight into `--proxy-file` and works
+   in every engine including Selenium.
+
+   One caveat, measured here on 2026-09-15 rather than assumed: a set of ten
+   such connections spoke **SOCKS5 and still demanded a username and
+   password** — offered no-auth alone they replied `0xFF`, "no acceptable
+   method", and offered user/pass they took it and then rejected the
+   account's own credentials. So "whitelisted" did not mean "no credentials"
+   on that account, and the HTTP form of the same `host:port` did not answer
+   at all. If yours behave the same way, the credentials are still needed and
+   the whitelist only decides whether your source is allowed to ask.
 2. **Ask for an HTTP endpoint instead.** `http://user:pass@host:port` works in
    Playwright and pyppeteer, which pass credentials through the driver's own
    fields rather than the command line.
