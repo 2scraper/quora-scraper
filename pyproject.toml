@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quora-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Quora answer scraper: topic feeds, question pages and profiles, across all twenty-four Quora language sites."
 readme = "README.md"
 license = "MIT"

@@ -538,6 +538,23 @@ def _fetch_one_page(session, args, pool, page_num: int,
                         page_flow.NEXT_BATCH_TIMEOUT_MS / 1000, refused,
                         args.delay)
                     return outcome
+                # Before calling that the end of the listing, ASK WHAT PAGE
+                # WE ARE ON — see the Playwright engine. A feed that stopped
+                # growing because Cloudflare replaced the page has not run
+                # out, and `exhausted` is a COMPLETE stop reason.
+                current = _content(session) or ""
+                state_now = _classify(session, current)
+                if page_flow.counts_as_blocked(state_now):
+                    outcome.state = "blocked_mid_scroll"
+                    outcome.blocked_by = (detect_bot_challenge(current)
+                                          or "bot-challenge")
+                    outcome.final_url = _current_url(session)
+                    logger.error(
+                        "The feed stopped growing because the page was "
+                        "replaced: it is now %s. This is NOT the end of the "
+                        "listing — reported as partial, not complete.",
+                        state_now)
+                    return outcome
                 outcome.state = "exhausted"
                 outcome.final_url = _current_url(session)
                 return outcome
