@@ -649,6 +649,60 @@ def test_challenge_is_not_always_solvable():
     return ok
 
 
+def test_captcha_capability_claims_match_the_code():
+    """§19: a sentence is the most expensive bug this family can ship.
+
+    Two directions, and this family has shipped both wrong:
+
+      * claiming a captcha CANNOT be solved, when what is true is that this
+        repo does not implement the task type. 2Captcha solves enterprise
+        reCAPTCHA and Cloudflare Turnstile and has for years, so such a
+        sentence tells a reader not to buy something that would have worked.
+        "Unsolvable" is a property of a PAGE carrying no widget, never of
+        the vendor.
+      * claiming this repo DOES solve something whose task type is built
+        nowhere in it, which is the same error facing the other way.
+
+    Nothing else in the suite can catch either: no test fails, no run
+    crashes, and the output is correct.
+    """
+    group("captcha capability claims (§19)")
+    ok = True
+    docs = {}
+    for name in ("README.md", "CHANGELOG.md"):
+        path = os.path.join(REPO_ROOT, name)
+        if os.path.exists(path):
+            docs[name] = open(path, encoding="utf-8", errors="replace").read()
+
+    # Conclusions about the PRODUCT. Phrases about a widget-less page are
+    # deliberately absent: such a page really does carry nothing to answer.
+    FORBIDDEN = ("cannot be solved", "can't be solved", "neither is solvable",
+                 "is not solvable", "solver is inapplicable", "no solver can",
+                 "nothing for a captcha solver to answer")
+    for name, text in docs.items():
+        if name == "CHANGELOG.md":
+            continue  # a released section is history and stays verbatim (§19)
+        low = text.lower()
+        for phrase in FORBIDDEN:
+            ok &= check(f"{name}: no {phrase!r} — write "
+                        f"'this repo does not implement X' instead",
+                        phrase not in low)
+
+    solver = open(os.path.join(REPO_ROOT, "captcha_solver.py"),
+                  encoding="utf-8").read()
+    engines = " ".join(_engine_source(e) or "" for e in ENGINES)
+    readme_low = docs.get("README.md", "").lower()
+    claims = ("turnstile" in readme_low and "does not implement" not in readme_low)
+    if claims:
+        ok &= check("README claims Turnstile solving, so the task type exists",
+                    "TurnstileTaskProxyless" in solver)
+        ok &= check("...and an engine installs the turnstile.render hook",
+                    "TURNSTILE_INTERCEPT_JS" in engines)
+    else:
+        ok &= check("README claims no Turnstile solve — nothing to back", True)
+    return ok
+
+
 def test_page_flow_policy():
     group("STATE_POLICY — the triage as DATA, not three if-chains")
     ok = True
@@ -1981,6 +2035,7 @@ def main() -> int:
     ok &= test_pagination()
     ok &= test_page_state()
     ok &= test_challenge_is_not_always_solvable()
+    ok &= test_captcha_capability_claims_match_the_code()
     ok &= test_page_flow_policy()
     ok &= test_scroll_loop()
     ok &= test_throttle_is_not_completion()
