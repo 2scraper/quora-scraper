@@ -90,7 +90,7 @@ body:
       placeholder: |
         python3 playwright_scraper.py \
           --url "https://www.quora.com/topic/Machine-Learning" \
-          --pages 3 --out grills
+          --pages 3 --out ml
     validations:
       required: true
 
@@ -110,7 +110,8 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        Rows from every scroll batch I asked for, with upvotes and views
+        filled on a question page.
     validations:
       required: true
 

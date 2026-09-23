@@ -24,6 +24,24 @@ bad default or violating the promise quietly.
 
 ### Fixed
 
+- **Leftovers from the sibling repos this one was bootstrapped from are
+  gone.** The worst was user-visible: when a
+  run was blocked with pyppeteer's bundled Chromium, `puppeteer_scraper.py`
+  logged that this was "the build this site was measured refusing" — true of
+  a sibling site, false here, where that Chromium is served and the gate is
+  the address's request rate. The log line is removed. Also:
+  `requirements.txt` carried a sibling repo's name; the three engine
+  requirements files explained a sibling site's HTTP 429 to bundled Chromium and told
+  you to `playwright install chrome` (this repo's README says `chromium`);
+  `.dockerignore` excluded a sibling's output prefix instead of this repo's default
+  output `quora_answers.*`; the site-change issue template asked for a
+  `__NEXT_DATA__` dump, a `c-lot-card` and a `bid_kind` label, and claimed
+  headless runs are refused; the bug template expected "96 products" from
+  `--out grills`; CONTRIBUTING said a datacentre run gets no response at
+  all (eight of fourteen were served), asked for price coverage, forbade
+  submitting a registration form, and scoped the repo to category, search
+  and product pages; a `captcha_solver.py` comment counted "lot links".
+
 - **README no longer says a challenge has nothing for a solver to answer.**
   Every measurement is unchanged. What changed is the reason this scraper
   does not solve one, which is now stated and is specific to this site: what
