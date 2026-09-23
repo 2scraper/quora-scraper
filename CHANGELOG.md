@@ -70,6 +70,9 @@ bad default or violating the promise quietly.
   Quora renders inside the title node, and no row wears the page's own
   question while answering a different one.
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 ## [0.1.1] — 2026-09-16
 
 The canary's first dispatch, run without a proxy secret exactly as §15 says
