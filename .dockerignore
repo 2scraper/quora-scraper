@@ -11,7 +11,8 @@ __pycache__/
 .venv/
 venv/
 env/
-vrbo_products.*
+quora_answers.*
+quora_answers_*.*
 *_debug.html
 *_debug.png
 live_results/
