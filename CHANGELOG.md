@@ -24,6 +24,20 @@ bad default or violating the promise quietly.
 
 ### Fixed
 
+- **The Scraper API path sent `waitFor` in a form the live API rejects,
+  and read the wrong field as the target's status.** Measured 2026-09-23
+  against `scraper.2captcha.com/tasks/sync`: `waitFor` sent as a
+  JSON-encoded string (what this client built for every `--wait-*` flag)
+  is answered HTTP 422 "params.waitFor must be an object" and is still
+  billed ($0.0005); the same request with an object gets HTTP 200. It is
+  now an object. And the response's `status` is the API's own verdict
+  ("success"), not the target site's HTTP code, which is `http_code` —
+  so a target 403 or 503 never reached the page classifier. The target
+  status is now read from `http_code` (falling back to `status` only if
+  that is an integer). Pinned by an offline check that drives the real
+  client with `requests.post` stubbed; verified by control (red with the
+  old client).
+
 - **README no longer says a challenge has nothing for a solver to answer.**
   Every measurement is unchanged. What changed is the reason this scraper
   does not solve one, which is now stated and is specific to this site: what
