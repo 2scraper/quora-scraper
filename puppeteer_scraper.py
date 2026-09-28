@@ -623,12 +623,6 @@ def _fetch_one_page(session, args, pool, page_num: int,
             "genuinely empty result (exit 4).", len(html or ""),
             "which references" if served else "with no reference to",
             debug_html)
-        if not args.chromium_path and not args.cdp_endpoint:
-            logger.error(
-                "This engine launched pyppeteer's OWN Chromium, which is the "
-                "build this site was measured refusing. Pass --chromium-path "
-                "pointing at an installed Chrome before concluding anything "
-                "about the address.")
         logger.error("%s", page_flow.block_advice(
             html, headless=bool(getattr(args, "headless", False)),
             has_pool=has_pool))

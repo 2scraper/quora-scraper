@@ -212,26 +212,23 @@ reason, not merely unfashionable.
 Most do not — the suite covers the parser, the writers, the captcha classifier
 and the CLI contract against inline fixtures. If yours genuinely needs
 quora.com, say in the PR what you ran, which URL and page kind, from
-which exit, and what you got — including the price and image coverage
-percentages the run prints, and the scroll trace from the sidecar. Note that
-a run from a datacentre address gets NO RESPONSE AT ALL, so "it returned
-nothing" from a VPS is not a finding. Product counts differ by category, by
-URL and by how far the scroll got, so a bare "worked for me" is not
-reproducible.
+which exit, and what you got — including the author/body and
+inline-payload coverage the run prints, and the scroll trace from the
+sidecar. Note that the challenge here tracks an address's recent request
+rate, so "exit 3" from an address that has been fetching a lot is not a
+finding. Row counts differ by URL, by mode and by how far the scroll got (four
+loads of one question gave 5, 13, 12 and 259 answers), so a bare "worked for
+me" is not reproducible.
 
 **Run more than the primary engine.** "Mirror them exactly" is a design rule,
 not a verification: the first live run of the pyppeteer engine crashed on its
 FIRST fetch on a signature mismatch that four separate offline checks and 400
 green assertions had not caught.
 
-Do not add anything that submits the registration form. This project
-deliberately never does, and a captcha token proved valid by creating a real
-account is not a result worth having.
-
 ## Scope
 
-This repo scrapes **public pages** on Quora: category listings, search
-listings and product pages, exactly as an anonymous visitor is served them.
+This repo scrapes **public pages** on Quora: topic feeds, question pages and
+profiles, exactly as an anonymous visitor is served them.
 Out of scope: anything behind a login, anything that submits a form, and
 anything that defeats a protection rather than passing it the way an ordinary
 browser does.
