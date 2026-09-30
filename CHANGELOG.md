@@ -24,6 +24,27 @@ bad default or violating the promise quietly.
 
 ### Fixed
 
+> **`--retries 0` is now refused (exit 2).** The page-load loop is
+> `range(1, retries + 1)`, so 0 never meant "no retries": it meant no
+> navigation attempt at all. `--retries` counts ATTEMPTS, the minimum is 1,
+> and `--help` now says it is not a cap on total requests, because a page the
+> site refuses is retried under its own, separate budget.
+
+- **A scroll cut off by its round budget is no longer reported as settled.**
+  All three engines wrote `"settled": true` whatever ended the loop. The
+  sidecar's scroll trace now carries `stopped_by` (`stable`, `target` or
+  `max_rounds`) and `settled` is false for `max_rounds`, with a warning in
+  the log. The run status is unchanged: `--pages` is the user's budget of
+  scrolls, so reaching it is not a failure.
+- **Output files are written atomically.** `write_json`, `write_csv` and
+  `write_run_meta` wrote in place, so a kill or a full disk halfway through
+  left a truncated file where a good one had been, and a sidecar beside it
+  describing the old run. They now write to a temporary file in the same
+  directory and rename over the destination. The mode follows the umask (a
+  new file) or the existing file's mode, rather than the temporary file's
+  0600.
+- The save message says `rows`, not `products`: this project reads answers.
+
 - **The Scraper API path sent `waitFor` in a form the live API rejects,
   and read the wrong field as the target's status.** Measured 2026-09-23
   against `scraper.2captcha.com/tasks/sync`: `waitFor` sent as a

@@ -2106,6 +2106,156 @@ def test_scraper_api_payload_and_status():
 
 
 
+def test_audit_fixes():
+    group("Scroll reasons, --retries >= 1, atomic writes (2026-10 audit)")
+    import argparse
+    import stat
+    import tempfile
+    import output_writer
+
+    ok = True
+
+    # -- a scroll that stopped because it ran out of rounds is not settled --
+    def _grow():
+        n = {"v": 0}
+
+        def count(_sel):
+            n["v"] += 1
+            return n["v"]
+        return count, n
+
+    count, n = _grow()
+    got, why = page_flow.scroll_feed(count, lambda: None,
+                                     lambda: n["v"] * 10, lambda ms: None,
+                                     target=None)
+    ok &= check("a feed still growing at the budget stops as max_rounds",
+                why == page_flow.SCROLL_STOP_MAX_ROUNDS)
+    trace = page_flow.scroll_trace(1, got, None, why)
+    ok &= check("and the trace says settled=False, not True",
+                trace["settled"] is False
+                and trace["stopped_by"] == "max_rounds")
+
+    _, why2 = page_flow.scroll_feed(lambda s: 7, lambda: None, lambda: 500,
+                                    lambda ms: None, target=None)
+    ok &= check("a feed that holds still stops as stable, settled=True",
+                why2 == page_flow.SCROLL_STOP_STABLE
+                and page_flow.scroll_trace(7, 7, None, why2)["settled"])
+
+    _, why3 = page_flow.scroll_feed(lambda s: 13, lambda: None, lambda: 500,
+                                    lambda ms: None, target=13)
+    ok &= check("reaching the question's own count stops as target",
+                why3 == page_flow.SCROLL_STOP_TARGET)
+
+    # The last round may be the one that reaches the target: the budget must
+    # not be blamed for a feed that delivered what the site promised.
+    seq = {"i": 0}
+
+    def count_last(_sel):
+        seq["i"] += 1
+        return seq["i"]
+    got4, why4 = page_flow.scroll_feed(count_last, lambda: None,
+                                       lambda: seq["i"] * 10,
+                                       lambda ms: None,
+                                       target=page_flow.SCROLL_MAX_ROUNDS + 1)
+    ok &= check("a target reached on the final round is not max_rounds",
+                why4 == page_flow.SCROLL_STOP_TARGET)
+
+    for engine in ENGINES:
+        src = _engine_source(engine)
+        if src is None:
+            continue
+        ok &= check(f"{engine} reads the reason, not a constant True",
+                    "page_flow.scroll_feed(" in src
+                    and "page_flow.scroll_trace(" in src
+                    and '"settled": True' not in src)
+
+    # -- --retries counts attempts, and 0 attempts navigates nowhere --------
+    ok &= check("--retries 0 is refused", _raises(
+        lambda: page_flow.attempts_arg("0")))
+    ok &= check("--retries -1 is refused", _raises(
+        lambda: page_flow.attempts_arg("-1")))
+    ok &= check("--retries x is refused", _raises(
+        lambda: page_flow.attempts_arg("x")))
+    ok &= check("--retries 1 is accepted as one attempt",
+                page_flow.attempts_arg("1") == 1)
+    ok &= check("the refusal is an argparse error (exit 2)", isinstance(
+        _catch(lambda: page_flow.attempts_arg("0")),
+        argparse.ArgumentTypeError))
+    for engine in ENGINES:
+        src = _engine_source(engine)
+        if src is None:
+            continue
+        ok &= check(f"{engine} validates --retries through page_flow",
+                    '"--retries", type=page_flow.attempts_arg' in src)
+
+    # -- a write that dies half-way leaves the previous good file alone -----
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.join(tmp, "out.json")
+        rows = [Answer(sku="a", url="https://www.quora.com/x")]
+        output_writer.write_json(rows, target)
+        good = open(target, "rb").read()
+
+        class Boom(Exception):
+            pass
+
+        def explode(obj, *a, **k):
+            fp = a[0] if a else k["fp"]
+            fp.write("[{\"truncated")
+            raise Boom()
+
+        real_dump = output_writer.json.dump
+        output_writer.json.dump = explode
+        try:
+            died = _raises(lambda: output_writer.write_json(rows, target))
+        finally:
+            output_writer.json.dump = real_dump
+        ok &= check("a write that raises mid-dump propagates", died)
+        ok &= check("the previous good file is byte-identical afterwards",
+                    open(target, "rb").read() == good)
+        ok &= check("and no temporary file is left beside it",
+                    sorted(os.listdir(tmp)) == ["out.json"])
+
+        meta_prefix = os.path.join(tmp, "run")
+        output_writer.write_run_meta(meta_prefix, {"status": "complete"})
+        ok &= check("the sidecar is written and readable", json.load(
+            open(meta_prefix + ".meta.json"))["status"] == "complete")
+        csv_path = os.path.join(tmp, "out.csv")
+        write_csv([], csv_path, Answer)
+        ok &= check("an empty CSV still carries its header",
+                    open(csv_path, encoding="utf-8").read().startswith("source,"))
+
+        # NamedTemporaryFile is 0600 and a rename keeps it.
+        if os.name == "posix":
+            umask = os.umask(0)
+            os.umask(umask)
+            fresh = os.path.join(tmp, "fresh.json")
+            output_writer.write_json(rows, fresh)
+            ok &= check("a new output gets the mode open() would have given",
+                        stat.S_IMODE(os.stat(fresh).st_mode)
+                        == (0o666 & ~umask))
+            os.chmod(target, 0o640)
+            output_writer.write_json(rows, target)
+            ok &= check("an existing output keeps its own mode",
+                        stat.S_IMODE(os.stat(target).st_mode) == 0o640)
+
+    src = open(os.path.join(REPO_ROOT, "output_writer.py"),
+               encoding="utf-8").read()
+    ok &= check("no writer opens its destination for truncation any more",
+                'open(path, "w"' not in src)
+    ok &= check("the save message says rows, because these are answers",
+                "products ->" not in src)
+    return ok
+
+
+def _catch(fn):
+    """The exception `fn()` raises, or None."""
+    try:
+        fn()
+    except Exception as e:  # noqa: BLE001
+        return e
+    return None
+
+
 def main() -> int:
     ok = True
     skips = []
@@ -2143,6 +2293,7 @@ def main() -> int:
     ok &= test_readme_claims()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_payload_and_status()
+    ok &= test_audit_fixes()
 
     passed = _total_checks - len(_failures)
     if passed < CLAIMED_CHECK_FLOOR:
