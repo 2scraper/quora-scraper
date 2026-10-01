@@ -441,7 +441,7 @@ def handle_captcha_if_present(session, args) -> bool:
 def _scroll_the_feed(session, args, html: str, page_num: int) -> dict:
     target = page_flow.answers_expected(html) if args.mode == "question" else None
     before = _count(session, page_flow.READY_SELECTOR)
-    reached = page_flow.scroll_until_settled(
+    reached, why = page_flow.scroll_feed(
         lambda sel: _count(session, sel),
         lambda: _scroll_to_bottom(session),
         lambda: _page_height(session),
@@ -451,8 +451,11 @@ def _scroll_the_feed(session, args, html: str, page_num: int) -> dict:
     logger.info("Scrolled batch %d: %d card(s) at first paint, %d after "
                 "scrolling%s.", page_num, before, reached,
                 f" (the question has {target} answers in total)" if target else "")
-    return {"first_paint": before, "reached": reached, "target": target,
-            "settled": True}
+    if why == page_flow.SCROLL_STOP_MAX_ROUNDS:
+        logger.warning("Batch %d stopped at the %d-round scroll budget while "
+                       "the feed was still growing: more cards exist than "
+                       "were read.", page_num, page_flow.SCROLL_MAX_ROUNDS)
+    return page_flow.scroll_trace(before, reached, target, why)
 
 
 def _fetch_one_page(session, args, pool, page_num: int,
@@ -849,8 +852,12 @@ def parse_args():
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Accepted for family compatibility and REFUSED above "
                         "1: a Quora feed has no per-batch address.")
-    p.add_argument("--retries", type=int, default=3,
-                   help="Attempts per page load before giving up (default 3).")
+    p.add_argument("--retries", type=page_flow.attempts_arg, default=3,
+                   help="Attempts per page load before giving up (default 3, "
+                        "minimum 1). Not a cap on total requests: a refused "
+                        "page is retried separately, "
+                        f"{page_flow.BLOCK_RETRIES_WITHOUT_POOL} more times "
+                        "without a proxy pool.")
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")

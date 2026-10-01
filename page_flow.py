@@ -44,8 +44,9 @@ OPERATION and each engine spells it in its own driver's dialect.
 
 from __future__ import annotations
 
+import argparse
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from product_parser import (SELECTORS, PAGE_CAP, CONCURRENCY_REASON,
                             PAGE_URL_REASON, answers_from_payloads,
@@ -145,14 +146,38 @@ SCROLL_MAX_ROUNDS = 12
 SCROLL_PAUSE_MS = 2_000
 
 
-def scroll_until_settled(count: Callable[[str], int],
-                         scroll_to_bottom: Callable[[], None],
-                         page_height: Callable[[], Optional[int]],
-                         sleep: Callable[[int], None],
-                         selector: str = READY_SELECTOR,
-                         target: Optional[int] = None,
-                         max_rounds: int = SCROLL_MAX_ROUNDS) -> int:
-    """Scroll until the feed stops growing, and return the final card count.
+def attempts_arg(text: str) -> int:
+    """argparse type for `--retries`: an ATTEMPT count, so at least 1.
+
+    The page-load loop is `range(1, retries + 1)`, so 0 is not "no retries",
+    it is "no attempts": the navigation never runs. Accepting it produced a
+    run that looked like a refusal. Rejecting it at parse time is exit 2,
+    which is what bad usage is.
+    """
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer")
+    if n < 1:
+        raise argparse.ArgumentTypeError(
+            "--retries counts ATTEMPTS per page load, so it must be at "
+            "least 1 (1 means one try and no retry)")
+    return n
+
+
+SCROLL_STOP_STABLE = "stable"        # count and height held still
+SCROLL_STOP_TARGET = "target"        # the question's own answer count reached
+SCROLL_STOP_MAX_ROUNDS = "max_rounds"  # budget spent while the feed still moved
+
+
+def scroll_feed(count: Callable[[str], int],
+                scroll_to_bottom: Callable[[], None],
+                page_height: Callable[[], Optional[int]],
+                sleep: Callable[[int], None],
+                selector: str = READY_SELECTOR,
+                target: Optional[int] = None,
+                max_rounds: int = SCROLL_MAX_ROUNDS) -> Tuple[int, str]:
+    """Scroll until the feed stops growing; return (cards, why it stopped).
 
     Requires the card count AND the document height to hold still for
     `SCROLL_STABLE_ROUNDS` consecutive rounds — the count alone is not
@@ -163,24 +188,50 @@ def scroll_until_settled(count: Callable[[str], int],
     meaningful in question mode, where the site publishes the question's own
     answer count; not reaching it ends nothing early, because the gap is
     reported rather than chased (§8).
+
+    The reason matters because the three endings are not the same claim:
+    `stable` says the feed stopped, `target` says we got what the site
+    promised, and `max_rounds` says only that we stopped LOOKING while the
+    feed was still growing. Reporting the third as settled was the defect.
     """
     seen = count(selector)
     height = page_height()
     stable = 0
     for _ in range(max_rounds):
         if target is not None and seen >= target:
-            break
+            return seen, SCROLL_STOP_TARGET
         scroll_to_bottom()
         sleep(SCROLL_PAUSE_MS)
         now, now_height = count(selector), page_height()
         if now == seen and now_height == height:
             stable += 1
             if stable >= SCROLL_STABLE_ROUNDS:
-                break
+                return now, SCROLL_STOP_STABLE
         else:
             stable = 0
         seen, height = now, now_height
-    return seen
+    # The budget ran out. Judge the final state before blaming the budget:
+    # the last round may itself have reached the target.
+    if target is not None and seen >= target:
+        return seen, SCROLL_STOP_TARGET
+    return seen, SCROLL_STOP_MAX_ROUNDS
+
+
+def scroll_until_settled(*args, **kwargs) -> int:
+    """`scroll_feed` without the reason, for callers that only want the count."""
+    return scroll_feed(*args, **kwargs)[0]
+
+
+def scroll_trace(before: int, reached: int, target: Optional[int],
+                 why: str) -> dict:
+    """The sidecar's record of one scroll batch.
+
+    `settled` is True only when the loop ended for a reason that says
+    something about the feed. A run that hit its round budget reports False,
+    so a consumer can tell a feed that stopped from one that was cut off.
+    """
+    return {"first_paint": before, "reached": reached, "target": target,
+            "settled": why != SCROLL_STOP_MAX_ROUNDS, "stopped_by": why}
 
 
 # ---------------------------------------------------------------------------

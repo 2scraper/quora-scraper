@@ -46,8 +46,11 @@ Everything below is row-class-agnostic: pass `row_cls` so an empty CSV still
 gets the right header for the mode that produced it.
 """
 
+import contextlib
 import csv
 import json
+import os
+import tempfile
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
@@ -231,8 +234,52 @@ def _csv_value(v: Any) -> Any:
     return v
 
 
+@contextlib.contextmanager
+def _atomic(path: str, newline: Optional[str] = None):
+    """Write to a temporary file beside `path`, then rename over it.
+
+    `save` refuses to overwrite good output with an empty result, and this
+    keeps the same promise for a run that dies MID-WRITE: a plain truncating
+    open leaves a shorter file where a complete one was after a kill or a
+    full disk halfway through `json.dump`, and the sidecar beside it still
+    describes the old, good run.
+
+    The temporary file goes in the SAME directory on purpose: `os.replace`
+    is only atomic within one filesystem, and a temp file under /tmp can be
+    on another, where the rename degrades to an interruptible copy. `fsync`
+    before the rename makes the content durable rather than merely visible.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline=newline, dir=directory,
+        prefix=os.path.basename(path) + ".", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        # NamedTemporaryFile creates 0600 and a rename keeps it, so without
+        # this every output would be owner-only, which a plain open would
+        # not have been (it honours the umask). An existing target keeps its
+        # own mode: someone may have tightened it on purpose.
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(handle.name, mode)
+        os.replace(handle.name, path)
+    except BaseException:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
 def write_json(rows: Sequence[Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)
 
 
@@ -245,7 +292,7 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
     # The header comes from `row_cls`, not from the first row, so an empty
     # run still writes the columns of the mode that produced it.
     fieldnames = [f.name for f in fields(row_cls)]
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    with _atomic(path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
@@ -334,7 +381,7 @@ def write_run_meta(out_prefix: str, meta: dict) -> str:
     both complete, and between runs of different `mode`.
     """
     path = f"{out_prefix}.meta.json"
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[+] Wrote run metadata -> {path} (status={meta.get('status')})")
     return path
@@ -409,7 +456,7 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 
     On zero rows, nothing is written at all unless `allow_empty`. Two reasons,
     and a live run demonstrated both. A page-load timeout produced
-    `Saved 0 products -> out.json` and exit 0: a two-byte `[]` that a
+    `Saved 0 rows -> out.json` and exit 0: a two-byte `[]` that a
     consuming pipeline reads as a successful run with no stock. Worse, if the
     file already held a good result from an earlier run, that result is now
     gone — the failure destroyed the last known good data. So an empty result
@@ -426,10 +473,10 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 
     if fmt in ("json", "both"):
         write_json(rows, f"{out_prefix}.json")
-        print(f"[+] Saved {len(rows)} products -> {out_prefix}.json")
+        print(f"[+] Saved {len(rows)} rows -> {out_prefix}.json")
     if fmt in ("csv", "both"):
         write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
-        print(f"[+] Saved {len(rows)} products -> {out_prefix}.csv")
+        print(f"[+] Saved {len(rows)} rows -> {out_prefix}.csv")
     return 0 if rows else EXIT_NO_PRODUCTS
 
 
