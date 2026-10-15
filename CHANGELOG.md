@@ -12,6 +12,68 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+> **Behaviour changes in this batch.** (1) A page whose answers were counted
+> but parsed to zero rows now ends the run with `stop_reason:
+> parser_found_nothing` and **exit 5** (or 6 after earlier batches), not
+> exit 4: it is a parser regression, not an empty feed. (2) An address that
+> answers **HTTP 404/410** stops with `stop_reason: not_found` and exit 5
+> instead of waiting, retrying and reporting an empty result (Playwright and
+> pyppeteer; Selenium has no status to read). (3) `--pages` and
+> `--concurrency` below 1, and negative `--delay`, `--retry-delay`,
+> `--proxy-block-retries` and `--cdp-connect-timeout`, are now refused with
+> **exit 2**; so are negative `--retries`/`--retry-delay` in
+> `scraper_api_client.py` (0 stays legal there). (4) CSV cells that begin
+> with `=`, `+`, `-`, `@`, a tab or a line break are prefixed with an
+> apostrophe; JSON is unchanged. (5) The canary now fails when it did not
+> parse real rows.
+
+### Fixed (third-party audit, 2026-10-14)
+
+- **One paid solve per page, at every call site.** Each engine checks for a
+  captcha twice per attempt — before classifying the page and after — and
+  only the second check was counted, so with the default block retries one
+  page could buy three solves against a limit of one. Both call sites now
+  claim from one per-page `SolveBudget`, immediately before the paid
+  request; detecting nothing costs nothing, a failed purchase still counts,
+  and a retry or rotation does not reset it. Verified with the solver
+  stubbed: 3 purchases before, 1 after, in all three engines.
+- **CSV formula neutralisation.** Answer bodies, author names and credential
+  lines are written by strangers, and a cell beginning with a formula
+  character is executed by a spreadsheet. Such string cells are escaped in
+  the CSV only; numbers are untouched, and the sidecar records
+  `csv_cells_escaped` (beneath any value the run itself supplies).
+- **A parser failure is no longer reported as an empty feed.** See the note
+  above; the canary fails on it by name.
+- **The navigation's HTTP status reaches the page classifier.** It was
+  discarded in all three engines, so a 401/403/429/5xx with no recognisable
+  challenge markup, and a 404, were judged from the document alone.
+- **The credential scan reads what it claimed to.** Exclusions were tested
+  against the absolute path, so a clone under a directory called `venv`
+  scanned 0 files and reported "nothing credential-shaped"; they are now
+  relative to the repository, and a scan that reads nothing fails. JSON
+  fixtures and every `.env*` file (an untracked `.env.bak` included) are now
+  scanned, with a key-field pattern that also matches JSON-escaped quotes.
+- **README: captcha solving.** The paid-products table still said a solver
+  buys "nothing on this site … there is nothing to solve", which the
+  correction above retracts. It now says this repo does not implement the
+  Turnstile interception Quora's managed challenge needs; TROUBLESHOOTING
+  and SECURITY say the same.
+- **README: exit codes and `--allow-empty`.** Exit 5 covers any run that
+  never got its content, not only a remote API refusal, and `--allow-empty`
+  keeps the exit code that says why there were no rows (3, 4 or 5).
+  `--concurrency` above 1 is documented as ignored with a warning, which is
+  what it does.
+- **Log text from another site.** Messages about "property cards", a
+  "search" and "a button press" now describe this site's scroll feed.
+- **`.gitignore` covers every dump shape**: `--dump-html X --pages 3`
+  writes `X.page3`, which was not ignored, nor were `live/`-style scratch
+  directories or a raw `.html` at the root.
+- **The canary no longer goes green without testing anything.** From
+  2026-10-11 to 2026-10-14 both halves met Cloudflare's challenge from the
+  bare runner and the badge stayed green. Any run that did not parse real
+  rows is now red, with the reason and the fix (`QUORA_PROXY`) in the log.
+- Comments and docs no longer cite private section numbers.
+
 > **Correction to a claim in earlier READMEs.** They said a managed
 > Cloudflare challenge "carries no sitekey … so there is nothing for a
 > captcha solver to answer". The measurement was right and the conclusion was
@@ -110,7 +172,7 @@ bad default or violating the promise quietly.
 
 ## [0.1.1] — 2026-09-16
 
-The canary's first dispatch, run without a proxy secret exactly as §15 says
+The canary's first dispatch, run without a proxy secret exactly as the family rule says
 to, failed — and it was right to. Three fixes, all in the same area and all
 found by that one run.
 
@@ -132,7 +194,7 @@ found by that one run.
 - **A feed that stopped growing because the page was REPLACED was reported as
   `exhausted`** — a COMPLETE stop reason — so a run blocked halfway would
   have claimed the listing ended, keeping its earlier batches and calling
-  them the whole thing (§7). All three engines now classify the current page
+  them the whole thing. All three engines now classify the current page
   before drawing that conclusion, and report `blocked_mid_scroll` instead.
 
 ### Added
@@ -208,7 +270,7 @@ metadata, no tests and no exit-code contract; none of that code survives.
   "Originally Answered:" banner. Both are read structurally, because both
   labels are localised across twenty-four language sites.
 
-### The paid paths, run rather than assumed (§16)
+### The paid paths, run rather than assumed
 
 - **Captcha solving**: the key works (balance read live), and there is
   nothing on this site to spend it on — see above.
@@ -217,7 +279,7 @@ metadata, no tests and no exit-code contract; none of that code survives.
   of its two formats, so `--fingerprint` there set no UA at all and presented
   a Windows fingerprint's screen, locale and timezone over a local Chromium's
   UA. That is the identity MISMATCH the flag exists to avoid, and it is the
-  same defect §16 records as having been live in four sibling repos. Fixed,
+  same defect the family rule records as having been live in four sibling repos. Fixed,
   routed through the shared helper, and asserted for all three engines.
 - **Scraper API**: works, and is the richest path per row this repo has on a
   QUESTION url — 6 answers, 6 of 6 payload-backed, every column populated,

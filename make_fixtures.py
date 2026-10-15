@@ -42,7 +42,7 @@ of them is a PERSON rather than the site:
 
 Quora answers are bylined public writing, but republishing a named person's
 prose in a scraper's test corpus is a separate act from the site showing it
-on its own page (§10, where a sibling repo committed a real customer's
+on its own page (where a sibling repo committed a real customer's
 review, name and photo ids). The STRUCTURE is what the checks need — the
 card's markup, the class hooks, the URL shapes, the payload's keys, the
 counts, the timestamps — and all of that survives untouched.
@@ -92,7 +92,7 @@ SOURCES = {
     # The DOM-only path, which is what a topic feed is.
     "TOPIC_EN":    ("topic_ml_scroll.html",
                     "https://www.quora.com/topic/Machine-Learning", 4),
-    # A second language, per §15. Spanish brings a non-ASCII question title,
+    # A second language, per the family rules. Spanish brings a non-ASCII question title,
     # a percent-encoded slug and a localised relative date ("3 años") that
     # must NOT be parsed into a date.
     "TOPIC_ES":    ("topic_es.html",
@@ -435,7 +435,7 @@ def _scrub_rendered(soup) -> None:
 # Quora's own long hex: image ids (`main-qimg-<32 hex>`), GraphQL query
 # hashes, build shas. None of it is a credential, and all of it looks exactly
 # like one to a scanner — including this repo's own CI grep, which fails on a
-# bare 32-hex string anywhere in a scanned file (§10). So every 24+ character
+# bare 32-hex string anywhere in a scanned file. So every 24+ character
 # hex run is replaced before a fixture is written.
 #
 # With ONE exception, and it has to be an exception: the key of an inline
@@ -642,7 +642,7 @@ def main():
     urls["BLOCK_CF"] = BLOCK_SOURCE[1]
     # Chromium's own answer when a proxy is dead: an empty document, because
     # Playwright does not expose the interstitial. It must classify as
-    # blocked, which is the inverted-detection case §18 describes — a
+    # blocked, which is the inverted-detection case the family rule describes — a
     # sibling repo measured 187,799 bytes of Chromium's network-error page
     # carrying the SITE'S OWN hostname in its <title>, which every text
     # marker reads as a real page and only the positive-asset check catches.

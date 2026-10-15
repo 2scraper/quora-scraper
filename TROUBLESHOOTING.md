@@ -37,10 +37,13 @@ Three things follow:
 So `--delay` is the cheapest lever, `--proxy-file` is the one that scales, and
 "it worked an hour ago" is not evidence that it will work now.
 
-**Do not buy a captcha solve for this.** A managed challenge carries no
-sitekey — 0 `data-sitekey` attributes and 0 Turnstile iframes on the page
-measured — so there is nothing for a solver to answer. This scraper never
-attempts one on that state and never charges you.
+**This scraper does not buy a captcha solve for this.** A managed challenge
+carries no sitekey in its markup — 0 `data-sitekey` attributes and 0
+Turnstile iframes on the page measured. Its arguments exist only inside the
+one `turnstile.render()` call, and this repo does not implement the
+interception that captures them (2Captcha's `TurnstileTaskProxyless` would
+solve the result). So this scraper never attempts a solve on that state and
+never charges you; `--delay` and `--proxy-file` are the levers here.
 
 If a run exits 3, the interstitial is saved beside your output as
 `<out>_page<N>_debug.html` with a screenshot next to it.

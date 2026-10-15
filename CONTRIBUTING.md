@@ -103,19 +103,16 @@ history needs a decision, not a red check on every push.
 
 Then the rest of the presentation, in the order that matters:
 
-1. `python3 smoke_test.py` green, and the canary dispatched at least once —
-   including its WARNING branch, which is what runs when a bare GitHub
-   runner's datacentre address is refused and no `QUORA_PROXY` secret is set.
-   This canary needs no secret to do real work: eight of fourteen fetches
-   were served in full with no key and no proxy, from a DATACENTRE address
-   at that. What it has NOT been measured doing is getting past
-   Cloudflare from a shared datacentre address, and since the challenge here
-   tracks the address's recent request rate, a runner is the worst case for
-   it. That is exactly why a block there is a warning rather than a failure —
-   until you set `QUORA_PROXY`, after which it is a failure, because then it
-   means something.
-2. The repo description, homepage and topics set (see the family notes on
-   what those should say).
+1. `python3 smoke_test.py` green, and the canary dispatched at least once.
+   The canary FAILS whenever it did not parse real rows — blocked (exit 3),
+   content never obtained (5), partial (6), or zero rows (4) — because a run
+   that never reached the site has not tested it. Eight of fourteen fetches
+   were served in full with no key and no proxy from a datacentre address,
+   but the challenge here tracks the address's recent request rate and a
+   shared runner is the worst case for that. If the bare runner keeps being
+   refused, set a `QUORA_PROXY` secret rather than turning the failure back
+   into a warning.
+2. The repo description, homepage and topics set.
 3. Only then the row in the org profile README — and check it with an
    ANONYMOUS request rather than your own logged-in browser. A row pointing
    at a private repo is a 404 for every visitor, which costs more trust than
@@ -146,7 +143,7 @@ will fail rather than silently regress:
 - **The card's author link is not the first `/profile/` link in the card.**
   The first one is the avatar and has no text, so reading it gives an author
   of `""` on every row while every coverage check reads 100%.
-- **The card scope stops at the answer BODY, not at the second id.** §4's
+- **The card scope stops at the answer BODY, not at the second id.** the
   "widen until you cover more than one item" never fires here: Quora wraps
   each card in a chain of single-child divs, and the ancestor sixteen levels
   up still holds one permalink while having absorbed the page footer
@@ -176,7 +173,7 @@ will fail rather than silently regress:
   pipeline branches on these. And a scroll that produced nothing new is
   `complete` only when nothing behind it was refused — otherwise it is
   `partial`, because a throttled run reporting "complete" is the failure
-  §7 exists to prevent.
+  the family rule exists to prevent.
 
 Two more that are about the fixtures rather than the code:
 

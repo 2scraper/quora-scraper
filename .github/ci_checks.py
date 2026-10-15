@@ -77,7 +77,7 @@ CREDENTIAL_ALLOWED = (
     # pasted while debugging. An allowlist entry would have switched the
     # check off exactly there. A sibling repo's copy of this script FAILED ON
     # ITS OWN MAIN for the opposite reason: its fixtures were neither
-    # allowlisted nor written this way (§17).
+    # allowlisted nor written this way.
     "{login}", "{user}", "password}@", "***", "u:p@h",
     "login:password@host:port",     # the shape a refusal message prints
     "user:secret@",                 # the proxy-pool masking fixtures
@@ -101,7 +101,17 @@ HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    ".json")
+
+# A key-shaped value under a key-shaped name, in source or in a JSON fixture.
+# Every quote may arrive escaped (`\\"apiKey\\": \\"...\\"`), because the
+# fixtures store captured pages as JSON strings; a pattern with bare quotes
+# matches nothing inside them. Alphanumeric, not just hex: a front-end key
+# need not be hex.
+KEY_SHAPED_FIELD = re.compile(
+    r'\\?"(?:api[_-]?key|apiKey|clientKey|client_key|twocaptcha_key)\\?"'
+    r'\s*:\s*\\?"([A-Za-z0-9]{24,})\\?"', re.IGNORECASE)
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -112,7 +122,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -139,12 +149,23 @@ def _is_in_virtualenv(path):
     return False
 
 
+def _is_scanned_name(path):
+    """A file this scan reads: source and docs, JSON fixtures and samples,
+    and every `.env*` file — a working copy renamed `.env.bak` or
+    `.env.local` is untracked, ignored, and exactly where a live key sits."""
+    return path.suffix in SCANNED_SUFFIXES or path.name.startswith(".env")
+
+
 def scanned_files():
     for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+        if not path.is_file() or not _is_scanned_name(path):
             continue
+        # Judged RELATIVE to the repository. `path.parts` includes every
+        # ancestor directory, so a clone made under a directory that happens
+        # to be called `venv` skipped every file and reported "nothing
+        # credential-shaped" after reading none.
         if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+               for part in path.relative_to(REPO).parts):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -236,6 +257,15 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+            for match in KEY_SHAPED_FIELD.findall(line):
+                failed.append(f"{rel}:{lineno} carries a key-shaped value "
+                              f"({match[:4]}…) under a key-shaped field name")
+
+    # A scan that read nothing has proved nothing. Reporting "ok" there is
+    # the failure this check exists to prevent, so it is a failure.
+    if not scanned:
+        failed.append("0 files scanned — the exclusions matched the whole "
+                      "repository, so nothing was checked")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

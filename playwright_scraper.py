@@ -87,6 +87,7 @@ from product_parser import (parse_answers, SELECTORS, PAGE_CAP,
                             source_of, unsupported_reason)
 from output_writer import dedupe_by_key, finish_run, EXIT_API_ERROR
 import page_flow
+import product_parser
 from proxy_pool import (from_args as proxy_pool_from_args, to_playwright, mask,
                         ROTATE_MODES, ProxyError)
 import env_config
@@ -163,7 +164,7 @@ class PageOutcome:
     # makes the difference between the two visible rather than assumed.
     answers_available: Optional[int] = None
     # None, always, on this site: Quora publishes no per-page counter, and an
-    # unknown gap must not read the same as a gap of zero (§8).
+    # unknown gap must not read the same as a gap of zero.
     gap: Optional[int] = None
     # What the scroll did: how many cards it reached and whether it SETTLED.
     # A batch whose feed was still growing when the round budget ran out is
@@ -198,7 +199,7 @@ FIELD_FLOOR = 90
 # engines make it identically. What lives here is only HOW to ask this
 # particular driver.
 #
-# The primitives are NAMED OPERATIONS rather than JavaScript (§1). Selenium's
+# The primitives are NAMED OPERATIONS rather than JavaScript. Selenium's
 # execute_script takes a function BODY with an explicit `return` while
 # Playwright and pyppeteer take `() => expr`, so a shared module handing JS
 # across this boundary would quietly acquire one driver's dialect.
@@ -236,7 +237,7 @@ def _scroll_to_bottom(page) -> None:
     To `document.body.scrollHeight` rather than by a fixed wheel distance: a
     fixed wheel stopped three rounds short of the bottom on a sibling site's
     7,600px grid, so the lazy-load trigger was never reached and a run took
-    30 of 50 cards while looking settled (§8).
+    30 of 50 cards while looking settled.
 
     Guarded for the same reason `_count` is: the page can navigate mid-loop
     on this site, and a scroll that raises turns a routine challenge into a
@@ -262,13 +263,13 @@ def _page_height(page) -> Optional[int]:
 # refusals is what separates a feed that ran out (COMPLETE) from one whose
 # next batch was refused (PARTIAL) — without it the two are the same
 # observation and a throttled run reports "complete" holding its first batch
-# (§7).
+#.
 #
 # Any status at or above 400, rather than one specific code, and the SAME
 # threshold in all three engines. A threshold that differed between them
 # would mean one engine reporting `complete` where its twins report `partial`
 # on the identical run, which is precisely the drift the shared modules exist
-# to prevent (§6) — and this file carried a sibling repo's single-code check
+# to prevent — and this file carried a sibling repo's single-code check
 # for several commits before the smoke suite was taught to compare the three.
 _GRAPHQL_PATH = "/graphql/"
 
@@ -552,7 +553,7 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args, budget) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page. The static-HTML and runtime
@@ -564,11 +565,13 @@ def handle_captcha_if_present(page, args) -> bool:
     case. Quora's refusal is Cloudflare's MANAGED challenge (`cType:
     'managed'`), and a managed challenge has no widget and no sitekey: 0
     `data-sitekey` attributes and 0 Turnstile iframes on the one measured.
-    There is nothing to hand a solver, so `page_flow.STATE_POLICY` marks
-    `challenge` as retry-but-do-not-solve and nothing is ever charged for it.
+    Its arguments exist only inside the one `turnstile.render()` call, and
+    this repo does not implement the interception that captures them, so
+    `page_flow.STATE_POLICY` marks `challenge` as retry-but-do-not-solve and
+    nothing is ever charged for it.
 
     The detector is still run on every navigation, and that asymmetry is
-    deliberate (§8). Quora HAS a captcha configured — Turnstile's loader is
+    deliberate. Quora HAS a captcha configured — Turnstile's loader is
     in the head of every page it serves and an empty
     `cf-turnstile-response` input sits in a 0x0 div — it simply does not
     render one to an anonymous reader. Which challenge a visitor meets
@@ -610,6 +613,10 @@ def handle_captcha_if_present(page, args) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page holds.")
         return False
+    # The allowance is claimed here, immediately before the only paid
+    # request, so a call that detected nothing has cost nothing.
+    if not budget.claim():
+        return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
@@ -646,7 +653,7 @@ def _scroll_the_feed(session, args, html: str, page_num: int) -> dict:
 
     `target` is the QUESTION's own answer count where the site states one. It
     ends the loop early if it is reached and ends nothing early if it is not,
-    because the gap is reported rather than chased (§8) — and on this site
+    because the gap is reported rather than chased — and on this site
     the gap is usually enormous and legitimate: a question with 253 answers
     renders twelve.
     """
@@ -674,7 +681,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
 
     `url` is the address to navigate to for page 1, and None for every page
     after it: pages 2..N on this site are not addresses at all, they are the
-    result of pressing the site's own button. Passing None is what makes that
+    result of scrolling the feed further. Passing None is what makes that
     explicit rather than leaving a stale URL to look like it was fetched.
 
     Returns a PageOutcome and never raises for an EXPECTED failure — a
@@ -689,7 +696,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
 
     has_pool = bool(pool and len(pool) > 1)
     # `RETRY_ON_BLOCKED` is CONSULTED, not merely documented — a policy
-    # constant nothing reads is the same defect as dead code (§17). It is
+    # constant nothing reads is the same defect as dead code. It is
     # True on this site because a RESTED address recovers: the same URL that
     # was challenged was served in full on the next attempt about a minute
     # later. The budget is deliberately small, because a BUSY address does
@@ -701,7 +708,12 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget(page_flow.SOLVES_PER_PAGE)
+    # The HTTP status the navigation returned, handed to the classifier so a
+    # 401/403/429/5xx refusal and a 404 are judged by what the server said.
+    # Selenium's WebDriver exposes no status, so that engine passes None and
+    # judges by the document alone.
+    http_status = None
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -711,8 +723,12 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
             logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
             for attempt in range(1, args.retries + 1):
                 try:
-                    session.page.goto(url, wait_until="domcontentloaded",
-                                      timeout=60000)
+                    response = session.page.goto(
+                        url, wait_until="domcontentloaded", timeout=60000)
+                    # None on a same-document navigation: no new response,
+                    # so the previous status stands.
+                    if response is not None:
+                        http_status = getattr(response, "status", None)
                     load_failed = False
                     break
                 except (PWTimeout, PWError) as e:
@@ -749,7 +765,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     # refusing. Those are two different endings and must not
                     # collapse into one: reporting this as the end of the
                     # listing would make a throttled run say "complete" while
-                    # holding its first batch (§7).
+                    # holding its first batch.
                     outcome.state = "no_turnover"
                     outcome.load_failed = True
                     outcome.final_url = session.page.url
@@ -773,7 +789,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                 # growing because the page was replaced has not run out. The
                 # engines used to report that as `exhausted`, which is a
                 # COMPLETE stop reason, so a run that was blocked halfway
-                # would have claimed the feed ended (§7).
+                # would have claimed the feed ended.
                 current = _content_when_settled(session.page) or ""
                 state_now = _classify(session.page, current)
                 if page_flow.counts_as_blocked(state_now):
@@ -804,14 +820,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args):
+        if handle_captcha_if_present(session.page, args, budget):
             session.page.wait_for_timeout(1000)
 
         html = _content_when_settled(session.page) or ""
-        state = _classify(session.page, html)
+        state = _classify(session.page, html, http_status)
 
         # "Not painted yet" is not a fault, and telling it apart from one is
-        # the distinction §8 is about. A search page's first response is a
+        # the distinction the family rule is about. A search page's first response is a
         # shell — the grid arrives over client-side GraphQL — so classified
         # naively it reads as something to retry, and retrying a shell buys
         # another shell. Wait for the anchor and re-classify BEFORE the retry
@@ -830,15 +846,13 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                 logger.info("The grid still had not painted after %.0fs "
                             "(%d match(es)).", wait_timeout / 1000, found)
             html = _content_when_settled(session.page) or html
-            state = _classify(session.page, html)
+            state = _classify(session.page, html, http_status)
 
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+        if page_flow.should_solve(state):
+            if handle_captcha_if_present(session.page, args, budget):
                 session.page.wait_for_timeout(1000)
                 html = _content_when_settled(session.page) or html
-                state = _classify(session.page, html)
+                state = _classify(session.page, html, http_status)
                 # The VERIFIED outcome, and the only one worth reporting: a
                 # "ready" task result is not evidence the token works. This
                 # line is what says whether the money bought anything.
@@ -898,6 +912,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         return outcome
 
     outcome.state = state
+
+    if state == "not_found":
+        # A terminal answer about the URL: nothing to wait for, parse or
+        # retry. Its own stop reason in scrape(), not "0 rows".
+        logger.error("%s does not exist (HTTP %s). Nothing was scraped; "
+                     "check the address.", url, http_status)
+        outcome.final_url = session.page.url
+        return outcome
 
     if page_flow.counts_as_blocked(state):
         debug_html = f"{args.out}_page{page_num}_debug.html"
@@ -1007,6 +1029,18 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     "card rendered.", page_num, enriched, len(products),
                     payload_share)
 
+    if not products and state == "content":
+        # The page was classified as content because answer cards (or the
+        # inline payload's answers) were counted on it, and the parser still
+        # produced nothing. That is a parser failure, not an empty topic:
+        # reported as exit 4 it would send the reader to check the URL
+        # instead of the card anchor.
+        outcome.state = "parse_failed"
+        logger.error("Page %d holds answers (%d card(s) counted) but parsed "
+                     "to 0 rows — the card anchor no longer matches what "
+                     "the site renders. Reported as parser_found_nothing, "
+                     "not as an empty result.", page_num,
+                     product_parser.count_cards(html or ""))
     if not products:
         debug_html = f"{args.out}_page{page_num}_debug.html"
         debug_png = f"{args.out}_page{page_num}_debug.png"
@@ -1042,10 +1076,10 @@ def scrape(args) -> int:
     # Refused, not silently honoured. A listing here has no per-page address,
     # so there is nothing to hand a second worker — and saying so is the
     # point: running one worker quietly would look like the flag did
-    # something (§18).
+    # something.
     if args.concurrency > 1:
         refusal = page_flow.concurrency_refusal(args.url)
-        logger.warning("--concurrency %d is refused: %s.",
+        logger.warning("--concurrency %d is ignored (running one worker): %s.",
                        args.concurrency, refusal)
 
     session = None
@@ -1060,6 +1094,12 @@ def scrape(args) -> int:
                 stop_reason = ("page_load_timeout" if first.load_failed
                                else f"blocked_{first.blocked_by}")
                 blocked = first.blocked_by is not None
+            elif first.state == "not_found":
+                stop_reason = "not_found"
+            elif first.state == "parse_failed":
+                # Served, holding answers, parsed to nothing: OUR bug. Not a
+                # complete stop reason, so 0 rows exits 5 rather than 4.
+                stop_reason = "parser_found_nothing"
             else:
                 seen_keys.update(p.sku for p in first.products if p.sku is not None)
                 for page_num in range(2, args.pages + 1):
@@ -1113,6 +1153,9 @@ def scrape(args) -> int:
                                        else f"blocked_{outcome.blocked_by}")
                         blocked = outcome.blocked_by is not None
                         break
+                    if outcome.state == "parse_failed":
+                        stop_reason = "parser_found_nothing"
+                        break
 
                     # Whether this page contributed anything not already
                     # seen. The authoritative dedupe happens once, after the
@@ -1124,7 +1167,7 @@ def scrape(args) -> int:
                                      if p.sku is not None)
                     if not fresh_count:
                         # A property of the DATA, not of a CSS selector that
-                        # may have been renamed (§7). On this site it is the
+                        # may have been renamed. On this site it is the
                         # ONLY termination signal there is: an infinite
                         # scroll has no last page to recognise.
                         logger.info("Batch %d added no rows not already seen "
@@ -1191,7 +1234,7 @@ def scrape(args) -> int:
         # What the QUESTION holds, where the site states it. Beside
         # `rows` in the sidecar rather than subtracted from it: the
         # difference is Quora rendering a fraction of a large question, not
-        # a gap this run failed to close (§8 — an unknown gap is not a gap).
+        # a gap this run failed to close (an unknown gap is not a gap).
         "answers_available": answers_available,
         "inline_payload_rows": sum(1 for r in all_rows
                                    if r.data_source != "dom"),
@@ -1237,22 +1280,22 @@ def parse_args():
                    help="Label to tag output rows with. Filled from the URL "
                         "by default — the topic, profile or question slug — "
                         "so it is rarely empty.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.positive_int_arg, default=1,
                    help=f"Number of scroll BATCHES to walk (default 1, cap "
                         f"{PAGE_CAP}). Quora has no per-page address in any "
                         f"mode: `?page=2` does not fail, it is ignored and "
                         f"the feed returns its first items again. So a batch "
                         f"is one settled scroll, batches are strictly "
                         f"sequential, and --concurrency cannot help.")
-    p.add_argument("--delay", type=float, default=3.0,
+    p.add_argument("--delay", type=page_flow.nonneg_float_arg, default=3.0,
                    help="Delay between batches, seconds (default 3.0). The "
                         "rate matters more than the address on this site: "
                         "fourteen fetches in twenty minutes from one exit "
                         "took the Cloudflare challenge rate from one-in-four "
                         "to three-in-three. This is the cheapest lever.")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
-                   help="Accepted for family compatibility and REFUSED above "
-                        "1, with the reason: a Quora feed has no per-page "
+    p.add_argument("--concurrency", type=page_flow.positive_int_arg, default=1, metavar="N",
+                   help="Accepted for family compatibility and IGNORED above "
+                        "1, with a warning: a Quora feed has no per-page "
                         "address, so batch 5 exists only inside the browser "
                         "that scrolled through batches 1-4 and there is "
                         "nothing to hand a second worker. Run several topics "
@@ -1268,7 +1311,7 @@ def parse_args():
                         "that comes back EMPTY is not retried — see "
                         "page_flow.STATE_POLICY — because an empty search is "
                         "a correct answer, not a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.nonneg_float_arg, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1305,7 +1348,7 @@ def parse_args():
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool at startup, so concurrent runs do "
                         "not all begin on the first exit in the file.")
-    p.add_argument("--proxy-block-retries", type=int, default=2,
+    p.add_argument("--proxy-block-retries", type=page_flow.nonneg_int_arg, default=2,
                    help="When a page comes back refused, retry it from this "
                         "many OTHER exits before giving up (default 2). Needs "
                         "a pool of more than one; ignored otherwise. Worth "
@@ -1328,7 +1371,7 @@ def parse_args():
     # ONE OS-family tag, not a list — and the default is what makes
     # --fingerprint work at all. It shipped as "Windows,Chrome,Desktop" across
     # this family, which the API rejects with HTTP 400, so --fingerprint
-    # failed on every invocation in four repos at once (§17).
+    # failed on every invocation in four repos at once.
     p.add_argument("--fp-tags", default="Windows",
                    help="ONE OS-family tag for the fingerprint filter: "
                         "Windows, Microsoft Windows or Android. NOT a list — "
@@ -1350,11 +1393,11 @@ def parse_args():
                         "always: solve whenever one is detected. Note what "
                         "neither setting reaches, and it is the normal case "
                         "here: Quora's refusal is Cloudflare's MANAGED "
-                        "challenge, which publishes no sitekey — 0 "
-                        "data-sitekey attributes and 0 Turnstile iframes on "
-                        "the one it served — so there is nothing for a solver "
-                        "to answer. Those are reported as a challenge to be "
-                        "retried, and nothing is charged.")
+                        "challenge, whose sitekey is not in the markup, and "
+                        "this repo does not implement the Turnstile "
+                        "interception that would capture it. Those are "
+                        "reported as a challenge to be retried, and nothing "
+                        "is charged.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or "
                         "0.9 — the API only accepts these three). Ignored for "
@@ -1366,7 +1409,7 @@ def parse_args():
                         "endpoint, or any browser that exposes a CDP URL. "
                         "--proxy, --browser-channel and --headless/--headful "
                         "are ignored when this is set.")
-    p.add_argument("--cdp-connect-timeout", type=float,
+    p.add_argument("--cdp-connect-timeout", type=page_flow.positive_float_arg,
                    default=CDP_CONNECT_TIMEOUT_MS / 1000, metavar="SECONDS",
                    help=f"How long to wait for --cdp-endpoint to accept the "
                         f"connection (default {CDP_CONNECT_TIMEOUT_MS // 1000}). "
