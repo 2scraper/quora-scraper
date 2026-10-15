@@ -75,10 +75,10 @@ was exhausted and report a **complete** run holding one batch. So:
 
 - a "page" here is **one settled scroll batch**;
 - the listing ends when a batch adds no `sku` the run has not already seen;
-- **`--concurrency` above 1 is refused, with that reason.** Batch 5 exists
-  only inside the browser that scrolled through batches 1-4; there is nothing
-  to hand a second worker. Run several topics in parallel instead, one
-  process each.
+- **`--concurrency` above 1 is ignored, with a warning that gives the
+  reason.** The run continues with one worker. Batch 5 exists only inside
+  the browser that scrolled through batches 1-4; there is nothing to hand a
+  second worker. Run several topics in parallel instead, one process each.
 
 Each batch re-parses the whole feed, so `rows_new_per_batch` in the sidecar is
 the number worth reading rather than the raw per-batch count.
@@ -213,8 +213,10 @@ dressed up as a reading.
 - **`language` is null on a Space or Session row.** Those hosts are not
   language sites, and their language is whatever their writers use.
 - **A run that finds nothing writes nothing**, so a bad run cannot overwrite
-  last night's good file. `--allow-empty` is the opt-out; the exit code is 4
-  either way.
+  last night's good file. `--allow-empty` is the opt-out: it writes the
+  empty file, and the exit code still says why there were no rows (4 for a
+  genuinely empty feed, 3 for a block, 5 for a run that never got its
+  content).
 
 ---
 
@@ -272,8 +274,8 @@ null on every row of every run of every mode is worse than six missing ones.
 | 1 | crash |
 | 2 | bad usage |
 | 3 | blocked — Cloudflare's challenge survived the retries |
-| 4 | ran fine, found nothing |
-| 5 | a remote API refused the connection |
+| 4 | ran fine, the site served the feed, and it held nothing |
+| 5 | the content was never obtained: a remote API error, a navigation timeout, a dead proxy, a refused batch, an address that answered 404, or a page that held answers and parsed to none (`stop_reason: parser_found_nothing`, a parser bug rather than an empty feed) |
 | 6 | partial — see `stop_reason` in the sidecar |
 
 `<out>.meta.json` records `status`, `stop_reason`, which batches failed *by
@@ -380,7 +382,7 @@ fetch a little of it for free.
 | [Scraping Browser API](https://2captcha.com) | a remote browser over CDP, with persistent profiles — no browser infrastructure of your own |
 | [Fingerprints](https://2captcha.com) | a consistent device identity across runs |
 | [Scraper API](https://2captcha.com) | a question's answers in one request, with every column populated, for $0.0005 — measured. Not a topic feed: see the table below. |
-| [Captcha solving](https://2captcha.com) | **nothing on this site.** Quora's refusal is a *managed* Cloudflare challenge with no sitekey; there is nothing to solve. The detector is kept because a rendered challenge is possible and a scraper that cannot name what stopped it is much harder to fix. |
+| [Captcha solving](https://2captcha.com) | **nothing in this repo today, because this repo does not implement the Turnstile interception that Quora's refusal needs.** The refusal is a *managed* Cloudflare challenge whose sitekey is not in the markup; its arguments can be captured from `turnstile.render()` and solved as `TurnstileTaskProxyless` (see the captcha section above), but the solver here is wired for reCAPTCHA only. At most one solve is bought per page. |
 
 All four sit behind one key. Put it in `.env` (see `.env.example`) rather than
 on a command line — a secret in `argv` is readable by anything that can run
@@ -444,7 +446,10 @@ Quora's own markup stay verbatim.
 
 `canary.yml` runs two real runs daily — a question URL for the inline-payload
 path and a topic URL for the DOM-only one — and asserts that each behaves the
-way this README says it does.
+way this README says it does. A run that did not parse real rows (blocked,
+never got its content, partial, or empty) turns the badge red rather than
+green: from a shared GitHub runner Cloudflare's rate-based challenge does
+refuse some days, and a `QUORA_PROXY` secret is what makes those days testable.
 
 ---
 

@@ -8,11 +8,11 @@ the site.
 Family naming, kept on purpose
 ------------------------------
 Every repo in this family calls this module `product_parser.py` and its row
-`Product`. Quora sells nothing, so the row here is an `Answer` (§9's
+`Product`. Quora sells nothing, so the row here is an `Answer` (the
 precedent: a sibling added a second dataclass for reviews rather than
 pretending a review was a product). The MODULE name is kept anyway, because
 `page_flow.py` and `scraper_api_client.py` import it by that name in six
-repos and a fix landed in one of them should apply here verbatim (§16).
+repos and a fix landed in one of them should apply here verbatim.
 
 What a row is
 -------------
@@ -44,7 +44,7 @@ Two sources, in this order
    is in the DOM for an anonymous reader.
 
    There is no JSON-LD anywhere: measured 0 `application/ld+json` blocks on
-   topic, question, profile, answer-permalink and language pages alike. §4's
+   topic, question, profile, answer-permalink and language pages alike. the
    primary path therefore falls to the site's own data, exactly as it did on
    a sibling site with no structured data.
 
@@ -55,14 +55,14 @@ Two sources, in this order
    are in that page's payloads. The DOM is what every mode has, so it is the
    skeleton and the payload is the overlay.
 
-`data_source` on every row records which of the two built it (§4: provenance
+`data_source` on every row records which of the two built it (provenance
 of a value goes in a column, never in a comment), and `parse_answers` logs
 the overlay's coverage so a run whose payload share collapses is visible
 rather than silently thinner.
 
-Anchoring on a class, which §4 normally forbids
+Anchoring on a class, which the family rule normally forbids
 -----------------------------------------------
-§4 says anchor on a URL pattern and never on a CSS class, because classes are
+The family rule says anchor on a URL pattern and never on a CSS class, because classes are
 build-generated hashes. Quora is the case that rule does not fit, in both
 directions:
 
@@ -101,7 +101,7 @@ log = logging.getLogger(__name__)
 # ===========================================================================
 # Hosts
 # ===========================================================================
-# Taken from Quora's own language switcher at /about/languages (§5: the
+# Taken from Quora's own language switcher at /about/languages (the
 # site's own set, not a guess), captured 2026-09-15. Twenty-three language
 # hosts plus www.
 #
@@ -143,7 +143,7 @@ LANGUAGE_HOSTS: Dict[str, str] = {
 HOSTS: Tuple[str, ...] = tuple(LANGUAGE_HOSTS)
 
 # Hosts that are on quora.com and are NOT a language site. Each is refused
-# WITH ITS REASON (§5: "is not a Quora site" is false and sends the reader
+# WITH ITS REASON ("is not a Quora site" is false and sends the reader
 # hunting for a typo).
 NON_CONTENT_HOSTS: Dict[str, str] = {
     "help.quora.com": "is Quora's help centre, which publishes articles "
@@ -224,7 +224,7 @@ def language_of(url: str) -> Optional[str]:
 
     A Space is not a language site: it inherits the language of whoever
     writes in it, and guessing `en` from the absence of a prefix would put a
-    guess in a data column (§8).
+    guess in a data column.
     """
     return LANGUAGE_HOSTS.get(site_host(url) or "")
 
@@ -272,7 +272,7 @@ def normalize_url(url: str) -> str:
 
     * `quora.com/…` -> `www.quora.com/…`. The bare host 301s, and a rebuilt
       URL that never matches the page's own breaks the join between a row and
-      its source (§5, where two of a sibling site's ten hosts answered
+      its source (where two of a sibling site's ten hosts answered
       without `www.` and quietly emptied the DOM-only columns).
     * An ANSWER permalink -> its question page. `/Q/answer/Someone` holds one
       answer; `/Q` holds all of them and is what the user almost certainly
@@ -418,12 +418,12 @@ def question_url_of(answer_url: str) -> Optional[str]:
 # GraphQL fetch when the reader nears the bottom, and none of them accepts a
 # page parameter. `?page=2` on a question URL is not an error — it is
 # ignored, and the page returns its first answers again, which is the failure
-# mode §18 warns about: a constructed URL that "works" and silently re-reads
+# mode the family rule warns about: a constructed URL that "works" and silently re-reads
 # page one would let a run report `complete` while holding a third of the
 # data.
 #
 # So `page_url` returns None with a reason, a "page" is one settled scroll
-# batch, and the terminating condition is the DATA one §7 asks for: a batch
+# batch, and the terminating condition is the DATA one the family rule asks for: a batch
 # that adds no new sku ends the listing.
 PAGINATES_BY_URL = False
 
@@ -450,7 +450,7 @@ def page_url(url: str, page: int) -> Optional[str]:
 def concurrency_limit(url: str = "") -> Optional[int]:
     """1, always — and the engines must REFUSE a higher value, not clamp it.
 
-    §7's concurrency rests on page N's address being knowable without
+    the concurrency rests on page N's address being knowable without
     fetching page N-1. Here it is not knowable at all: batch 5 of an infinite
     scroll exists only inside the browser that scrolled through batches 1-4,
     so there is nothing to hand a second worker.
@@ -479,7 +479,7 @@ SELECTORS: Dict[str, str] = {
     "answer_body": ".puppeteer_test_answer_content, .spacing_log_answer_content",
     # The card's author link. The FIRST profile link in a card is the avatar
     # and has no text — reading that one gives an author of "" on every row
-    # while looking like it worked (§8).
+    # while looking like it worked.
     "author_link": 'a[href*="/profile/"]',
     # The block holding the author's name, their credential for THIS answer
     # and the date, in that order. Present on every card of every mode
@@ -501,7 +501,7 @@ SELECTORS: Dict[str, str] = {
 
 # How many rendered answer links mean "this feed has painted". Must be > 1:
 # waiting for one match resolves on the page's own first card long before the
-# feed is there (§5).
+# feed is there.
 MIN_CARD_MATCHES = 2
 
 NEXT_PAGE_SELECTOR = ""      # there is no next-page control anywhere on Quora
@@ -581,7 +581,7 @@ def _nodes_of_type(payloads: Sequence[dict], typename: str) -> List[dict]:
 #
 # Reading `.get("title")` and writing it to a column puts that whole JSON
 # blob in the row, which is the kind of 100%-populated, entirely-wrong column
-# §10 exists to catch.
+# The family rule exists to catch.
 _LIST_TYPES = ("unordered-list", "ordered-list")
 
 
@@ -702,7 +702,7 @@ def answers_from_payloads(html: Optional[str], base_url: str) -> Dict[str, dict]
 
     Returns a dict rather than a list because this is an OVERLAY: the DOM
     decides which rows exist and in what order, and this is looked up per row
-    (§4's structured-vs-displayed reconciliation, in this site's shape).
+    (the structured-vs-displayed reconciliation, in this site's shape).
     Answers the payload carries and the DOM does not render are returned too;
     `parse_answers` appends them, because a machine answer at
     `/{Q}/answers/{aid}` is real content that the feed renders in a block the
@@ -766,9 +766,9 @@ def _row_from_payload(node: dict, base_url: str) -> dict:
 # ===========================================================================
 # The rendered cards
 # ===========================================================================
-# Widening a permalink to its card, by the §4 rule and one addition.
+# Widening a permalink to its card, by the same rule and one addition.
 #
-# §4 says stop at the outermost ancestor still covering exactly one item,
+# The family rule says stop at the outermost ancestor still covering exactly one item,
 # counting distinct ids. On Quora that rule alone never fires: the feed wraps
 # every card in a chain of single-child divs, and the ancestor at sixteen
 # levels up STILL holds one permalink while having absorbed the neighbouring
@@ -778,7 +778,7 @@ def _row_from_payload(node: dict, base_url: str) -> dict:
 # So the stop condition is a POSITIVE one — the first ancestor that contains
 # the answer's own body — with the distinct-permalink count kept as the guard
 # that stops it one level before a neighbour's card, and the level cap kept
-# as the backstop §4 asks for.
+# as the backstop the family rule asks for.
 _WIDEN_CAP = 16
 
 
@@ -823,7 +823,7 @@ def _author_of(card) -> Tuple[Optional[str], Optional[str]]:
 # The header reads "{Author} {Credential} · {Date}" with no element that
 # holds the credential alone — its own wrapper is a build-hashed class
 # (`c1h7helg`) carrying a `--separator` CSS variable, which is exactly the
-# kind of anchor §4 forbids. So the credential is read the way §4 reads a
+# kind of anchor the family rule forbids. So the credential is read the way the family rule reads a
 # price out of a node that also holds a strike: from a COPY of the header
 # with the author and timestamp subtrees removed, leaving what is by
 # definition the credential.
@@ -901,7 +901,7 @@ def page_question_title(html: Optional[str]) -> Optional[str]:
     On a question page the answer cards carry no question title — the
     question is the page's `h1`, printed once. Without this fallback
     `--mode question` writes a null `title` on every row while topic and
-    profile mode fill it, which is the sort of per-mode hole §10's
+    profile mode fill it, which is the sort of per-mode hole the
     value-assertions exist to catch.
     """
     if not html:
@@ -937,7 +937,7 @@ def answers_from_dom(html: Optional[str], base_url: str) -> List[dict]:
             # the page's own question. A question page carries answers to
             # OTHER questions too — merged duplicates, related questions and
             # promoted answers — and handing those the page's heading is a
-            # confidently wrong value rather than a missing one (§8). Measured
+            # confidently wrong value rather than a missing one. Measured
             # on one live run: 27 of 260 rows would have claimed the wrong
             # question.
             same_question = (page_question is not None
@@ -973,7 +973,7 @@ def answers_from_dom(html: Optional[str], base_url: str) -> List[dict]:
 # Challenge, block and page-state detection
 # ===========================================================================
 # Every marker below was COUNTED on six pages known to be good before it was
-# written down (§18: a marker that matches every page is worse than no
+# written down (a marker that matches every page is worse than no
 # marker). Two obvious candidates failed that test and are deliberately
 # absent:
 #
@@ -992,7 +992,7 @@ def answers_from_dom(html: Optional[str], base_url: str) -> List[dict]:
 #                              page config. A marker that fires only on good
 #                              pages is the failure inverted.
 #
-# So Quora is §18's "configured but not rendered" case exactly: a captcha is
+# So Quora is the "configured but not rendered" case exactly: a captcha is
 # wired into every page and an anonymous reader is never shown one.
 CHALLENGE_MARKERS: Tuple[str, ...] = (
     "just a moment...",
@@ -1004,7 +1004,7 @@ CHALLENGE_MARKERS: Tuple[str, ...] = (
 )
 
 # What a solver could actually be pointed at, if Quora ever rendered one.
-# Kept deliberately broader than what has been observed (§8: detection stays
+# Kept deliberately broader than what has been observed (detection stays
 # broad, paying stays narrow).
 BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
     "g-recaptcha",
@@ -1025,7 +1025,7 @@ BOT_CHALLENGE_MARKERS: Tuple[str, ...] = (
 # than as a solvable one so they pay.
 SOLVABLE_CHALLENGES: Tuple[str, ...] = ("recaptcha", "hcaptcha")
 
-# The positive "this page was built out of Quora's own assets" signal (§8).
+# The positive "this page was built out of Quora's own assets" signal.
 # Counted: 265-354 occurrences on every good page, 0 on the challenge page
 # and 0 on a browser network-error page, which no marker list would recognise
 # because it carries the site's own hostname in its <title>.
@@ -1050,7 +1050,7 @@ def detect_bot_challenge(html: Optional[str], url: str = "") -> Optional[str]:
     Only ever REFINES a verdict the page-state policy has already reached —
     it is not consulted for a page that classified as `content` or `empty`,
     because a detection on a page whose answers are already rendered guards
-    nothing and a detection on a correct empty answer is simply wrong (§18).
+    nothing and a detection on a correct empty answer is simply wrong.
     """
     lowered = (html or "").lower()
     for marker in BOT_CHALLENGE_MARKERS:
@@ -1080,7 +1080,7 @@ def detect_block_marker(html: Optional[str]) -> Optional[str]:
 
 # Quora's own empty answers, in the languages this repo has captured. A
 # POSITIVE signal only: a feed with no cards and none of this copy is a page
-# still painting, and the two want opposite responses (§18).
+# still painting, and the two want opposite responses.
 NO_RESULTS_MARKERS: Tuple[str, ...] = (
     "there are no answers yet",
     "no answers yet",
@@ -1099,20 +1099,21 @@ def is_no_results(html: Optional[str]) -> bool:
 
 def detect_page_state(html: Optional[str], status: Optional[int] = None,
                       url: str = "") -> str:
-    """Which of five states this response is.
+    """Which of six states this response is.
 
     Ordered by how much each signal PROVES, not by what is cheap to check
-    (§17). `status` is positional and second, matching `page_flow.classify`;
+. `status` is positional and second, matching `page_flow.classify`;
     two engines in a sibling repo passed it as a keyword and both crashed on
     their first fetch, invisibly to every offline check.
 
-    The five:
+    The six:
 
         content    answers are in the document
         empty      the site's own "no answers" copy, in its own language
         challenge  an interstitial, named by vendor where it names itself
         blocked    a refusal with nothing to read, or a page that is not
                    Quora's at all
+        not_found  HTTP 404/410: the address does not exist
         shell      Quora's, served, and the feed has not painted yet — the
                    state that wants the readiness wait and the scroll rather
                    than a refetch. EVERY Quora page starts here: the server
@@ -1142,6 +1143,14 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     #    generic block.
     if is_challenge_page(html):
         return "challenge"
+
+    # 3b. The address does not exist. Only the STATUS says so: Quora's own
+    #     404 body has not been captured (every request from this repo's
+    #     test address is refused by Cloudflare first), so there is no body
+    #     marker for it, and the Selenium engine, which has no status, still
+    #     reads a 404 page through the checks below.
+    if status in (404, 410):
+        return "not_found"
 
     # 4. A refusal with no page to read.
     if status is not None and (status in (401, 403, 429) or status >= 500):
@@ -1198,7 +1207,7 @@ def parse_answers(html: str, url: str, page: int = 1,
     `page` is threaded in rather than defaulted, because `position` restarts
     at 1 on every page and a `page` column stuck at 1 makes the pair
     worthless — 60 of 119 rows of a sibling repo's two-page run silently
-    claimed a position another row already held (§18). `smoke_test.py`
+    claimed a position another row already held. `smoke_test.py`
     asserts the pair is unique across a multi-page run.
     """
     mode = mode or listing_kind(url)
@@ -1251,7 +1260,7 @@ def _build(values: dict, sku: str, provenance: str, source: str,
     # eighteen — and those really are a different catalogue. Taking them from
     # the run's URL instead would label a Session answer `www.quora.com` and
     # give it the run's language, which is a guess wearing the look of a
-    # fact (§8). `source`/`language` arguments remain the fallback for a row
+    # fact. `source`/`language` arguments remain the fallback for a row
     # whose own URL is unusable.
     row_source = source_of(url) or source
     row_language = language_of(url) if site_host(url) else language

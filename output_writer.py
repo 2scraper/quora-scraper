@@ -24,12 +24,12 @@ for a reason worth recording. Quora is not a shop in any sense: it has no
 price, no currency, no discount, no stock and no brand, and there is no
 measurement to write down beside those names because there is nothing on the
 page to measure. Six columns null on every row of every run of every mode is
-exactly what §9 says must not exist, so they are not here.
+exactly what the family rule says must not exist, so they are not here.
 
 What IS kept, byte-identical and in order, is the family prefix — `source`,
 `scraped_at`, `url`, `sku`, `title` — so one column name works across the
 family and a consumer reading six of these repos reads the same first five
-columns in the same order (§9).
+columns in the same order.
 
 Two family columns are absent for measured reasons rather than definitional
 ones, and those measurements belong here:
@@ -53,7 +53,7 @@ import os
 import tempfile
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
-from typing import Optional, List, Set, Sequence, Any, Type
+from typing import Optional, List, Set, Sequence, Any, Tuple, Type
 
 
 # The host a row came from. It genuinely varies: Quora runs twenty-four
@@ -154,12 +154,12 @@ class Answer:
     # The topic, profile or question slug the run was pointed at.
     category: Optional[str] = None
     # Which feed this row came off. Recorded because the repo reads more than
-    # one kind and the mode is no longer implied by the source (§9).
+    # one kind and the mode is no longer implied by the source.
     mode: Optional[str] = None
     # Which of the two views built this row: `dom+inline`, `dom`, or
     # `inline`. The columns above marked "inline payload only" are null on a
     # `dom` row, so this is the column that tells a consumer whether a null
-    # upvote count means zero upvotes or means nobody looked (§8: never
+    # upvote count means zero upvotes or means nobody looked (never
     # present a guess as a fact). `diff_runs.py` reports a difference that
     # comes with a `data_source` difference as `source_changed`.
     data_source: Optional[str] = None
@@ -193,7 +193,7 @@ def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List
     than its siblings do: a scroll batch re-parses the WHOLE feed, cards
     already read included, so every batch after the first arrives mostly
     duplicate by design. A batch that drops all of its rows is the signal
-    that the feed is exhausted, which is §7's data-based terminating
+    that the feed is exhausted, which is the data-based terminating
     condition and the only one available here.
 
     A row with no key is always kept: there is nothing to check a duplicate
@@ -232,6 +232,36 @@ def _csv_value(v: Any) -> Any:
     if isinstance(v, (list, tuple)):
         return LIST_CSV_SEPARATOR.join(str(x) for x in v)
     return v
+
+
+# A spreadsheet treats a cell beginning with one of these as a FORMULA, not
+# as text, and nearly every string in a row here was written by a stranger:
+# the answer body, the author's name and their self-chosen credential line.
+# `=HYPERLINK(...)`, `+cmd|...` and `@SUM(...)` are the classic shapes; the
+# tab and the newline are here because a leading one is stripped by some
+# readers, which exposes whatever follows it.
+CSV_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+# Prefixed to a cell that would otherwise be read as a formula. Excel, Google
+# Sheets and LibreOffice all treat the apostrophe as "the rest of this cell
+# is text" and do not show it; a consumer parsing the CSV with `csv` sees it,
+# which is why the count goes in the sidecar rather than staying silent.
+CSV_FORMULA_ESCAPE = "'"
+
+
+def _csv_escape(v: Any) -> Tuple[Any, bool]:
+    """Neutralise a formula-shaped cell. Returns (value, was_escaped).
+
+    Only STRINGS are touched. Escaping a number would turn `-5` into the text
+    `'-5` and break every sum a consumer writes over the column.
+
+    CSV only. The JSON output keeps the site's text exactly as served, so the
+    two files deliberately differ; `csv_cells_escaped` in the sidecar is what
+    declares that divergence instead of leaving it to be discovered.
+    """
+    if isinstance(v, str) and v.startswith(CSV_FORMULA_LEADS):
+        return CSV_FORMULA_ESCAPE + v, True
+    return v, False
 
 
 @contextlib.contextmanager
@@ -283,7 +313,7 @@ def write_json(rows: Sequence[Any], path: str) -> None:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)
 
 
-def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
+def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> int:
     # An empty result still gets the header row. A zero-byte file makes a
     # consumer fail on read (no columns to parse) instead of reading a valid
     # table with zero rows — and "an empty result is still a well-formed
@@ -291,12 +321,24 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
     #
     # The header comes from `row_cls`, not from the first row, so an empty
     # run still writes the columns of the mode that produced it.
+    #
+    # Returns how many cells were escaped as formula-shaped (see _csv_escape).
     fieldnames = [f.name for f in fields(row_cls)]
+    escaped = 0
     with _atomic(path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: _csv_value(v) for k, v in asdict(r).items()})
+            row = {}
+            for k, v in asdict(r).items():
+                # Escape AFTER `_csv_value`: a list joined into one cell is
+                # text too, and its first element can be formula-shaped
+                # while the list itself is not a string.
+                value, was_escaped = _csv_escape(_csv_value(v))
+                row[k] = value
+                escaped += was_escaped
+            writer.writerow(row)
+    return escaped
 
 
 # Exit code used when a run completes but produced nothing. Distinct from 1
@@ -305,40 +347,31 @@ EXIT_NO_PRODUCTS = 4
 
 # Exit code for a run blocked by a bot-check/challenge page before parsing
 # even started — distinct from EXIT_NO_PRODUCTS so a caller can tell "the
-# search genuinely matched nothing" from "something stood between us and the
+# topic genuinely has no answers" from "something stood between us and the
 # content". See product_parser.detect_bot_challenge.
 #
-# On this site this code specifically does NOT cover the three ways to get a
-# real page with no products on it: a `/p/<slug>` discovery hub, which
-# answers 200 with banners and carousels and no grid; a search whose query
-# matches nothing ("Oops, produk nggak ditemukan"); and one page past the
-# end of a category listing. All three are EXIT_NO_PRODUCTS — the request
-# was served exactly as asked and simply has no products on it. Reporting
-# any of them as blocked would send a user hunting for a proxy problem that
-# does not exist.
-#
-# What EXIT_BLOCKED means here is unusually literal: this site refuses a
-# address it has scored NOTHING at all. No status code, no interstitial, no
-# vendor marker — the HTTP/2 stream is reset and the run sees a connection
-# error rather than a page.
+# On this site it does NOT cover a real page with nothing on it: a topic,
+# question or profile Quora served with its own "no answers" copy is
+# EXIT_NO_PRODUCTS — the request was served exactly as asked. What it does
+# cover is Cloudflare's managed challenge ("Just a moment...") that survived
+# its retries, and a page that was not built out of Quora's own assets at all.
 EXIT_BLOCKED = 3
 
-# Exit code for a run that gathered SOME rows and then stopped early — a
-# page-load timeout, a 503 throttle, or a challenge on page 3 of 10. The
-# output file is still written (throwing away three good pages would be
-# worse), but it is not a complete picture, and a consumer that cannot tell
-# the difference will read the pages that were never fetched as products that
-# disappeared from the catalogue. See write_run_meta.
 # A REMOTE service failed — the Scraping Browser refusing the connection
 # (`profile_locked` is the common one: a profile allows a single live
 # connection), or the Scraper API answering an error. Distinct from 1 (a
 # crash in this code) and from 2 (bad usage) because it means "try again, or
-# use a different profile", not "there is a bug here". Defined once, here,
-# because the browser engines and scraper_api_client.py both return it and
-# two definitions of the same code is exactly how a family's exit contract
-# drifts.
+# use a different profile", not "there is a bug here". The same number as
+# EXIT_FETCH_FAILED below, which widens it to any run that never got its
+# content.
 EXIT_API_ERROR = 5
 
+# Exit code for a run that gathered SOME rows and then stopped early — a
+# page-load timeout, a refused batch, or a challenge mid-scroll. The output
+# file is still written (throwing away the batches already read would be
+# worse), but it is not a complete picture, and a consumer that cannot tell
+# the difference will read the answers never fetched as answers that
+# disappeared. See write_run_meta.
 EXIT_PARTIAL = 6
 
 
@@ -441,14 +474,15 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
     }
     if extra:
         # Merged rather than nested under a key, so a consumer reads
-        # `shop_rating` at the top level beside `products`. Run fields win a
+        # `answers_available` at the top level beside `products`. Run fields win a
         # name collision: a caller cannot accidentally overwrite `status`.
         meta.update({k: v for k, v in extra.items() if k not in meta})
     return meta
 
 
 def save(rows: Sequence[Any], out_prefix: str, fmt: str,
-         allow_empty: bool = False, row_cls: Type = Product) -> int:
+         allow_empty: bool = False, row_cls: Type = Product,
+         stats: Optional[dict] = None) -> int:
     """Write JSON/CSV and return a process exit code.
 
     Returns 0 when rows were written, EXIT_NO_PRODUCTS when there were none.
@@ -475,8 +509,18 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
         write_json(rows, f"{out_prefix}.json")
         print(f"[+] Saved {len(rows)} rows -> {out_prefix}.json")
     if fmt in ("csv", "both"):
-        write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
+        escaped = write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
         print(f"[+] Saved {len(rows)} rows -> {out_prefix}.csv")
+        # Reported through `stats` rather than as a return value because
+        # this function's return IS the exit code. The caller threads it into
+        # the sidecar.
+        if stats is not None:
+            stats["csv_cells_escaped"] = escaped
+        if escaped:
+            print(f"[!] {escaped} CSV cell(s) began with a formula character "
+                  f"and were prefixed with {CSV_FORMULA_ESCAPE!r} so a "
+                  f"spreadsheet reads them as text. The JSON output is "
+                  f"unchanged — see csv_cells_escaped in the sidecar.")
     return 0 if rows else EXIT_NO_PRODUCTS
 
 
@@ -493,7 +537,7 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # 2 does not fail when you try it — `?page=2` is IGNORED and the feed comes
 # back with its first items again. So a run that trusted a built URL would
 # find no new sku, call the listing exhausted, and report COMPLETE holding
-# one batch (§18).
+# one batch.
 #
 # "no_new_products" is therefore the data-side termination condition, and on
 # this site it is the ONLY one: an infinite scroll has no last page to
@@ -539,12 +583,19 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # names has a hole for every name nobody added to it.
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed
     row_cls = ROW_CLASS_BY_MODE.get(mode, Product)
-    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls)
+    write_stats: dict = {}
+    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls,
+              stats=write_stats)
     wrote_output = bool(rows) or allow_empty
 
     if wrote_output:
         status = "complete" if (rows and complete) else (
             "partial" if rows else "failed")
+        # Merged UNDER the caller's `extra`, never over it: an engine's own
+        # extras win a name collision, because the other way round would be
+        # housekeeping silently dropping site data.
+        if write_stats:
+            extra = {**write_stats, **(extra or {})}
         write_run_meta(out_prefix, run_meta(
             status=status, stop_reason=stop_reason,
             pages_requested=pages_requested, pages_completed=pages_completed,
@@ -555,7 +606,7 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     if not rows:
         # Nothing gathered at all, and WHY decides the code. The three
         # answers are genuinely different things and a pipeline branches on
-        # them (§8: blocked is not empty is not partial):
+        # them (blocked is not empty is not partial):
         #
         #   blocked          something stood between the run and the content
         #   did not complete we never reached the site — a dead proxy, a
@@ -572,9 +623,15 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
         if blocked:
             return EXIT_BLOCKED
         if not complete:
-            print(f"[!] Failed run: 0 of {pages_requested} page(s) were "
-                  f"fetched ({stop_reason}). This is NOT an empty result — "
-                  f"nothing was read from the site at all.")
+            if stop_reason == "parser_found_nothing":
+                print("[!] Failed run: the site served answers and the parser "
+                      "read none of them (parser_found_nothing). This is NOT "
+                      "an empty result — it is a parser bug; re-run with "
+                      "--dump-html and check the card anchor.")
+            else:
+                print(f"[!] Failed run: 0 of {pages_requested} page(s) were "
+                      f"fetched ({stop_reason}). This is NOT an empty result "
+                      f"— nothing was read from the site at all.")
             return EXIT_FETCH_FAILED
         return rc
     if not complete:

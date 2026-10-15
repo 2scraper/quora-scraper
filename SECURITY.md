@@ -56,8 +56,8 @@ Not because these do not matter, but because they belong somewhere else:
 - **Bypassing Quora's bot protection.** This scraper drives an ordinary
   browser and waits out challenges the way a browser does. Anything about how
   Cloudflare behaves is not a vulnerability in this repository — and note this
-  repo attempts no captcha solve at all on this site, because the challenge it
-  serves has nothing to solve.
+  repo attempts no captcha solve on the challenge this site serves, because
+  it does not implement the Turnstile interception that challenge needs.
 - **The scraper stopped working.** Quora changing its markup is expected —
   file it as a normal issue, there is a template for exactly that.
 - **Anything about 2Captcha's services** — the solver API, the Scraping Browser

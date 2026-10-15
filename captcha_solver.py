@@ -16,7 +16,7 @@ Turnstile's own loader is in the head of every page it serves
 empty `cf-turnstile-response` input sits inside a 0x0 fixed div on every one
 of them — wired, mounted, never filled. Neither of those is a block marker
 and neither is in `product_parser.BOT_CHALLENGE_MARKERS`; a marker present
-on every good page is worse than no marker (§18).
+on every good page is worse than no marker.
 
 What Quora serves when it refuses is Cloudflare's MANAGED challenge, and a
 managed challenge has no widget and no sitekey at all — `cType: 'managed'`,

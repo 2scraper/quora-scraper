@@ -2,7 +2,7 @@
 
 Quora answers a request five ways, and four of them want a different
 response, which is why this module exists rather than the same triage being
-written three times inside three engines and drifting apart (§1):
+written three times inside three engines and drifting apart:
 
     content    answers are in the document, or the inline payload describes
                some
@@ -24,7 +24,7 @@ its own `q-box` class in the raw response body of six captures, against
 385-1165 in the hydrated document. So the first response of a perfectly
 healthy topic page is a 100 KB shell, and an engine that treated "no cards in
 the first response" as a reason to refetch would refetch every page it ever
-loaded and still never see an answer (§18). What the shell DOES carry, on a
+loaded and still never see an answer. What the shell DOES carry, on a
 question or profile page, is the inline GraphQL payload — which is why
 `detect_page_state` asks the payload before it gives up on the document.
 
@@ -36,7 +36,7 @@ passes its own driver's primitives and keeps its browser plumbing to itself:
     page_height() -> Optional[int]      document.body.scrollHeight
     sleep(ms) -> None                   wait
 
-No JavaScript crosses that boundary in either direction (§1): Selenium's
+No JavaScript crosses that boundary in either direction: Selenium's
 `execute_script` takes a function BODY with an explicit `return` where
 Playwright and pyppeteer take `() => expr`, so this module names the
 OPERATION and each engine spells it in its own driver's dialect.
@@ -62,7 +62,7 @@ logger = logging.getLogger("page_flow")
 # ---------------------------------------------------------------------------
 READY_SELECTOR = SELECTORS["item_card"]
 
-# Above 1, per §5: waiting for a single match resolves on the page's own
+# Above 1, per the family rules: waiting for a single match resolves on the page's own
 # first card long before the feed paints. Measured first paints: 20 cards on
 # a topic page, 12 on a question page, 18 on a profile.
 MIN_CARD_MATCHES = 2
@@ -106,7 +106,7 @@ def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
     `wait_for_function` hands the browser a string to evaluate, which a site
     whose CSP lacks `unsafe-eval` refuses outright — it took a sibling
     repo's run down with `EvalError` and exit 1 on that site's most obvious
-    URL (§18).
+    URL.
 
     Quora's own CSP does allow `unsafe-eval`, read from the response headers
     of a question page on 2026-09-15, so a string wait would in fact work
@@ -140,8 +140,8 @@ def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
 # Scroll to `document.body.scrollHeight` rather than wheeling a fixed
 # distance: a fixed wheel stopped three rounds short of the bottom on a
 # sibling site's 7,600px grid, so the lazy-load trigger was never reached and
-# a run took 30 of 50 cards while looking settled (§8).
-SCROLL_STABLE_ROUNDS = 3        # §8: the next batch takes longer than one pause
+# a run took 30 of 50 cards while looking settled.
+SCROLL_STABLE_ROUNDS = 3        # the family rule: the next batch takes longer than one pause
 SCROLL_MAX_ROUNDS = 12
 SCROLL_PAUSE_MS = 2_000
 
@@ -162,6 +162,41 @@ def attempts_arg(text: str) -> int:
         raise argparse.ArgumentTypeError(
             "--retries counts ATTEMPTS per page load, so it must be at "
             "least 1 (1 means one try and no retry)")
+    return n
+
+
+def _number_arg(text: str, cast, minimum, what: str):
+    try:
+        n = cast(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number")
+    if n != n or n < minimum:   # n != n: NaN
+        raise argparse.ArgumentTypeError(f"must be {what}, got {text!r}")
+    return n
+
+
+def positive_int_arg(text: str) -> int:
+    """argparse type for a COUNT that must be at least 1 (`--pages`,
+    `--concurrency`). argparse prefixes the flag's name to the message."""
+    return _number_arg(text, int, 1, "at least 1")
+
+
+def nonneg_int_arg(text: str) -> int:
+    """argparse type for an extra-retry count, where 0 means "none"."""
+    return _number_arg(text, int, 0, "0 or more")
+
+
+def nonneg_float_arg(text: str) -> float:
+    """argparse type for a delay in seconds. A negative delay is not a
+    shorter one: `time.sleep` raises on it, mid-run."""
+    return _number_arg(text, float, 0.0, "0 or more")
+
+
+def positive_float_arg(text: str) -> float:
+    """argparse type for a timeout, which must be above zero."""
+    n = _number_arg(text, float, 0.0, "above 0")
+    if n == 0:
+        raise argparse.ArgumentTypeError(f"must be above 0, got {text!r}")
     return n
 
 
@@ -187,7 +222,7 @@ def scroll_feed(count: Callable[[str], int],
     `target` ends the loop early when it is reached. It is only ever
     meaningful in question mode, where the site publishes the question's own
     answer count; not reaching it ends nothing early, because the gap is
-    reported rather than chased (§8).
+    reported rather than chased.
 
     The reason matters because the three endings are not the same claim:
     `stable` says the feed stopped, `target` says we got what the site
@@ -239,13 +274,13 @@ def scroll_trace(before: int, reached: int, target: Optional[int],
 # ---------------------------------------------------------------------------
 def classify(html: Optional[str], status: Optional[int] = None,
              url: str = "") -> str:
-    """Which of the five states this response is.
+    """Which of the six states this response is.
 
     `status` is positional and comes SECOND, matching `detect_page_state`.
     Getting that wrong is not a style question: a sibling repo shipped two of
     three engines calling this as `classify(html, url=...)`, both crashed on
     their first fetch, and nothing short of a live run or a signature-binding
-    check saw it (§17). This repo's smoke suite binds every shared-module
+    check saw it. This repo's smoke suite binds every shared-module
     call in every engine for that reason.
     """
     if html is None:
@@ -254,7 +289,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
 
 
 # The retry/solve/blocked decision as DATA rather than as three copies of an
-# if-chain in three engines (§1).
+# if-chain in three engines.
 #
 #   parse    is there anything on this page worth writing down?
 #   retry    would fetching it again, later or from a different exit,
@@ -268,7 +303,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     "empty":     {"parse": False, "retry": False, "solve": False, "blocked": False},
     # Served and still painting — the NORMAL first state on this site. Wants
     # the readiness wait and the scroll, not another fetch: refetching a
-    # shell buys another shell (§18). Parsed because by the time an engine
+    # shell buys another shell. Parsed because by the time an engine
     # asks, the wait has already run, and because a question page's shell
     # carries five answers in its inline payload.
     "shell":     {"parse": True,  "retry": False, "solve": False, "blocked": False},
@@ -281,12 +316,18 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     # with `blocked: False` the first live run walked straight past it,
     # handed the 6 KB interstitial to the parser, and reported exit 4 ("ran
     # fine, found nothing") on a topic holding hundreds of answers. That is
-    # exactly the confusion §8 forbids: blocked is not empty.
+    # exactly the confusion the family rule forbids: blocked is not empty.
     #
     # `retry` is still True and is tried FIRST, so a challenge that clears —
     # the common case, measured — never reaches this.
     "challenge": {"parse": False, "retry": True,  "solve": False, "blocked": True},
     "blocked":   {"parse": False, "retry": True,  "solve": False, "blocked": True},
+    # The address does not exist (HTTP 404 or 410 from the navigation). A
+    # terminal answer about the URL, not about the site's willingness to
+    # serve it: retrying spends the budget on an address that will never
+    # exist, and calling it blocked (exit 3) would send the reader after a
+    # proxy problem when the thing to check is what they typed.
+    "not_found": {"parse": False, "retry": False, "solve": False, "blocked": False},
 }
 
 
@@ -323,7 +364,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 #   everything after    ~30 fetches over three hours, 0 served
 #
 # Three things follow, and each is a policy constant below rather than a
-# paragraph an engine might not read (§17: a policy constant nothing consults
+# paragraph an engine might not read (a policy constant nothing consults
 # is the same defect as dead code):
 #
 #   * EARLY ON it is transient. Within the first window the same URL that
@@ -337,15 +378,54 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 #     budget is SMALL: a few retries are worth trying and a long loop is not,
 #     because past a point nothing on the client side helps and the run
 #     should say so rather than keep paying for latency.
-#   * It is NOT SOLVABLE. A managed challenge carries no sitekey: measured 0
-#     `data-sitekey` attributes and 0 Turnstile iframes on the interstitial
-#     Quora served, with `cType: 'managed'` in its own config. There is
-#     nothing to hand 2Captcha, so `should_solve` is False for this state and
-#     nothing is ever charged for it.
+#   * This repo does NOT SOLVE it. A managed challenge carries no sitekey in
+#     its MARKUP: measured 0 `data-sitekey` attributes and 0 Turnstile
+#     iframes on the interstitial Quora served, with `cType: 'managed'` in
+#     its own config. The arguments exist only inside `turnstile.render()`,
+#     and this repo does not implement the interception that captures them,
+#     so `should_solve` is False for this state and nothing is ever charged
+#     for it.
 RETRY_ON_BLOCKED = True
 BLOCK_RETRIES_WITHOUT_POOL = 2
 BLOCK_RETRIES_WITH_POOL = 3
 SOLVES_PER_PAGE = 1
+
+
+class SolveBudget:
+    """The per-page allowance for paid solves, shared by every call site.
+
+    Each engine calls `handle_captcha_if_present` twice per attempt: once
+    before the page is classified, so a challenge is cleared before anything
+    is judged, and once after, for the state that says the page really is
+    gated. Both calls take this one object and claim from it only at the
+    point where a task would really be submitted.
+
+    Counting only the second call (as this repo once did) let the first one
+    repeat on every block-retry, so one page could buy a solve per retry
+    against a limit of one. Counting every CALL instead would let the
+    pre-classification call, which on a normal page detects nothing and buys
+    nothing, use up the allowance before a late-rendered challenge is seen.
+
+    A claim that is then refused or fails at the solver still counts: it was
+    a request sent, and possibly billed. Detecting nothing, finding the
+    answers already rendered, or having no API key claims nothing. The
+    allowance does NOT reset on retry or rotation: a fresh exit is a reason
+    to re-fetch, not a fresh allowance to spend.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def claim(self) -> bool:
+        """Count one purchase if the allowance permits it. False if not."""
+        if self.spent >= self.limit:
+            logger.info("Not attempting another solve on this page: %d of %d "
+                        "already bought. A second solve is a second charge "
+                        "for the same answer.", self.spent, self.limit)
+            return False
+        self.spent += 1
+        return True
 
 
 def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
@@ -393,14 +473,14 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
 # returns None: Quora publishes no per-page address in any mode. `?page=2` on
 # a topic or question URL is not an error — it is IGNORED, and the feed comes
 # back with its first items again. A run built on it would add no new sku,
-# call the listing exhausted and report COMPLETE holding one batch (§18).
+# call the listing exhausted and report COMPLETE holding one batch.
 #
 # There is no next-page control either: 0 `link[rel=next]`, 0 pagination
 # elements and 0 "next" buttons across six captures. What exists is the feed
 # extending itself when the reader nears the bottom.
 #
 # So a "page" in this repo is one SETTLED SCROLL BATCH, and the terminating
-# condition is the DATA one §7 asks for: a batch that adds no sku this run
+# condition is the DATA one the family rule asks for: a batch that adds no sku this run
 # has not already seen ends the listing. That is not a fallback here — it is
 # the only signal there is.
 NEXT_BATCH_TIMEOUT_MS = 45_000
@@ -420,7 +500,7 @@ def advance_feed(scroll_to_bottom: Callable[[], None],
     Returns ADVANCED or NO_GROWTH, and the two must not collapse into one
     bool: a sibling repo mapped both to False, the engine mapped False to
     `pagination_exhausted`, and a run that was being rate-limited reported
-    status "complete" holding page 1 (§7).
+    status "complete" holding page 1.
 
     Readiness is the CARD COUNT growing. The document height is watched too
     but is not sufficient on its own — Quora grows the page by the height of
@@ -467,7 +547,7 @@ def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
     rendered everything it was going to.
 
     None rather than 0, because an unknown gap is not a gap of zero and the
-    two must not read the same in a sidecar (§8).
+    two must not read the same in a sidecar.
     """
     return None
 
@@ -492,7 +572,7 @@ def answers_expected(html: Optional[str]) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # The feed's length is decided at LOAD, not by scrolling
 # ---------------------------------------------------------------------------
-# §8's third case, measured on this site: "a different page was served to
+# the third case, measured on this site: "a different page was served to
 # this SESSION — no amount of waiting or scrolling helps".
 #
 # Four loads of the SAME question URL, 2026-09-15, same machine, same

@@ -33,29 +33,27 @@ name: canary
 # behaviour, and this canary does not assume it.
 #
 # WHAT IS measured is that the challenge tracks the address's recent request
-# RATE: everything after those first fourteen fetches was refused, and a
-# 45-minute rest did not clear it. A shared GitHub runner is used by many
-# jobs, so its recent rate is not something this workflow controls — which is
-# the real reason a blocked run here is reported as a WARNING and does not
-# fail the badge, UNLESS a `QUORA_PROXY` secret is set: with an exit this
-# workflow does control, a block stops being an access condition and starts
-# being a signal.
+# RATE, and a shared GitHub runner's rate is not something this workflow
+# controls. Until 2026-10-14 that was the reason a blocked run was only a
+# WARNING — and for four days running the badge stayed green while both
+# halves met Cloudflare's "Just a moment..." and nothing was tested. A canary
+# that did not reach the site has not passed.
+#
+# So now ANY run that did not parse real rows FAILS: exit 3 (blocked), 5
+# (never got its content), 6 (partial), 4 (zero rows), and a topic half that
+# did not succeed. The error says why and names the fix. If the bare runner
+# keeps being refused, give the canary an exit whose rate it controls:
 #
 #     gh secret set QUORA_PROXY --repo 2scraper/quora-scraper
 #
 # The secret is passed through the ENVIRONMENT, which env_config.py already
-# reads for exactly this variable, rather than through a --proxy flag. Two
-# reasons: a credential on a command line is readable by anything that can
-# run `ps`, which is the rule this repo states and should therefore follow in
-# its own CI; and an unset secret arrives as an empty string, which the
-# loader already treats as "not configured", so there is no commented-out
-# line for anyone to forget to uncomment. One line is correct with and
-# without it.
+# reads for exactly this variable, rather than through a --proxy flag: a
+# credential on a command line is readable by anything that can run `ps`,
+# and an unset secret arrives as an empty string, which the loader treats as
+# "not configured". One line is correct with and without it.
 #
-# A check that is always red teaches everyone to ignore checks, which is
-# worse than having no check at all — hence the warning path. But a warning
-# must not read as a pass either, so every one of them also writes to the
-# step summary saying in words that the canary did not test anything.
+# Every refusal path also writes to the step summary, so a red badge says in
+# words what happened.
 
 on:
   schedule:
@@ -116,33 +114,28 @@ jobs:
 
       - name: Interpret the exit code
         id: verdict
-        # ACCESS CONDITIONS ARE NOT DEFECTS, and on this site that
-        # distinction is what decides whether the badge means anything.
+        # A canary that did not parse real rows did not test the site, and
+        # it is not reported as a pass whatever the reason.
         run: |
           set -e
           code="${{ steps.run.outputs.exit_code }}"
-          tested=true
+          if [ "$HAVE_PROXY" = "true" ]; then via="through the QUORA_PROXY exit"; else via="from a bare GitHub runner with no QUORA_PROXY secret set"; fi
           case "$code" in
             0)
-              echo "OK — rows parsed from a live run." ;;
+              echo "OK — rows parsed from a live run."
+              echo "tested=true" >> "$GITHUB_OUTPUT" ;;
             3)
-              if [ "$HAVE_PROXY" = "true" ]; then
-                echo "::error::Blocked (exit 3) WITH a dedicated proxy exit in play. That is no longer an access condition this workflow cannot control — either Cloudflare's rules for this site have changed, or the exit itself is already rate-scored. The debug dump in the artefacts carries the interstitial."
-                exit 1
-              fi
-              tested=false
-              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner, with no QUORA_PROXY secret set. Cloudflare's challenge on this site tracks the address's recent request RATE, and a shared runner's rate is not something this workflow controls — so this says nothing about this code and the run is not failed. It also means the site-side check did NOT happen today. Set QUORA_PROXY to make this canary real."
-              echo "### Canary did NOT test anything (exit 3, blocked)" >> "$GITHUB_STEP_SUMMARY"
-              echo "A bare runner address met Cloudflare's managed challenge. The parser was not exercised. Set a \`QUORA_PROXY\` secret to give this canary an exit whose request rate it controls; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::Blocked before parsing (exit 3) $via. The site was NOT tested today. Cloudflare's challenge here tracks the address's recent request rate; if this repeats, set the QUORA_PROXY secret so the canary has an exit whose rate it controls (or, if it is already set, that exit is rate-scored too). The interstitial is in the artefacts."
+              echo "### Canary FAILED: blocked (exit 3), nothing was tested" >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
             6)
-              tested=false
-              echo "::warning::Partial run (exit 6). The commonest cause here is a scroll batch being refused: the HTML keeps answering 200 while POST /graphql is refused. canary_question.meta.json carries the stop_reason. Not failed, because that is an access condition — but if it repeats every day, suspect the card anchor instead."
-              echo "### Canary tested only PART of the run (exit 6)" >> "$GITHUB_STEP_SUMMARY"
-              echo "See \`stop_reason\` in the sidecar artefact. \`next_batch_refused\` is rate limiting; anything else is worth reading." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::Partial run (exit 6) $via: the scroll was not completed, so the canary did not test the whole read. canary_question.meta.json carries the stop_reason; next_batch_refused is rate limiting (raise --delay or set QUORA_PROXY), anything else is worth reading."
+              echo "### Canary FAILED: partial run (exit 6)" >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
             5)
-              tested=false
-              echo "::warning::Remote API error (exit 5) — a remote endpoint refused the connection, so nothing was tested."
-              echo "### Canary did NOT test anything (exit 5)" >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::The content was never obtained (exit 5) $via: a navigation timeout, a dead proxy, a 404, or a page that held answers and parsed to none (stop_reason parser_found_nothing, which is a parser regression). Nothing was tested; see the log and the artefacts."
+              echo "### Canary FAILED: content never obtained (exit 5)" >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
             4)
               echo "::error::Ran fine and parsed 0 rows (exit 4) from a question that holds hundreds of answers. The card anchor (a.answer_timestamp) or the inline-payload push pattern has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
               exit 1 ;;
@@ -153,7 +146,6 @@ jobs:
               echo "::error::Unexpected exit code $code (see the step above for the traceback)."
               exit 1 ;;
           esac
-          echo "tested=$tested" >> "$GITHUB_OUTPUT"
 
       - name: Sanity-check the question run
         # Only when the run actually got in: on a blocked run there is no
@@ -286,7 +278,7 @@ jobs:
 
           # A row with no payload behind it must NOT carry payload-only
           # columns: that would mean a value arrived from somewhere nobody
-          # wrote down, which is worse than a null (§8).
+          # wrote down, which is worse than a null.
           for r in rows:
               if r.get("data_source") == "dom":
                   leaked = [f for f in ("upvotes", "views", "shares",
@@ -328,7 +320,7 @@ jobs:
 
           # An answer whose body is present must have a length that matches
           # it. A column that is 100% populated and entirely wrong is this
-          # family's most expensive bug class (§10).
+          # family's most expensive bug class.
           for r in rows:
               if r.get("text") and r.get("text_chars") != len(r["text"]):
                   fail.append(f"{r.get('sku')}: text_chars "
@@ -350,6 +342,9 @@ jobs:
 
       - name: Scrape a real topic feed (the DOM-only path)
         id: topic
+        # Runs even when the question half failed, so one red run reports
+        # both halves.
+        if: ${{ !cancelled() }}
         continue-on-error: true
         env:
           QUORA_PROXY: ${{ secrets.QUORA_PROXY }}
@@ -362,10 +357,9 @@ jobs:
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Sanity-check the topic run
-        # A block here is an access condition exactly as above, so it only
-        # runs when the fetch succeeded — and when it did, the DOM-only
-        # invariants are asserted properly.
-        if: steps.topic.outputs.exit_code == '0'
+        # Only when the fetch succeeded; the step after this one fails the
+        # job when it did not.
+        if: ${{ !cancelled() && steps.topic.outputs.exit_code == '0' }}
         run: |
           python3 - <<'EOF'
           import json, sys
@@ -412,11 +406,12 @@ jobs:
           print(f"ok  {len(rows)} topic rows, all DOM-built as expected")
           EOF
 
-      - name: Note a blocked topic run without failing
-        if: steps.topic.outputs.exit_code != '0'
+      - name: Fail when the topic run did not parse rows
+        if: ${{ !cancelled() && steps.topic.outcome != 'skipped' && steps.topic.outputs.exit_code != '0' }}
         run: |
-          echo "::warning::The topic run exited ${{ steps.topic.outputs.exit_code }} — the DOM-only path was not exercised today. See the artefacts."
-          echo "### The topic (DOM-only) half of the canary did not run" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::The topic run exited ${{ steps.topic.outputs.exit_code }} — the DOM-only path was NOT tested today (3 = blocked, 5 = content never obtained, 4 = zero rows). If it is a block from the bare runner, set the QUORA_PROXY secret. See the artefacts."
+          echo "### Canary FAILED: the topic (DOM-only) half did not parse rows" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       # Uploaded on EVERY run, including the blocked ones: the interstitial
       # is the only way to see what refused us, and it is gone by the time

@@ -307,6 +307,19 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     return save(products, args.out, args.format, allow_empty=args.allow_empty)
 
 
+def _nonneg_int(text: str) -> int:
+    """argparse type for `--retries` and `--retry-delay` here, where 0 is
+    legal (`--retries` counts EXTRA attempts) and a negative value is not:
+    it used to be accepted and silently clamped."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer")
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {text!r}")
+    return n
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Quora answer scraper — 2captcha Scraper API edition "
@@ -348,11 +361,11 @@ def parse_args():
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 products were parsed. Off by "
                         "default so a failed fetch can't overwrite a good result.")
-    p.add_argument("--retries", type=int, default=1,
+    p.add_argument("--retries", type=_nonneg_int, default=1,
                    help="Extra attempts if a bot-challenge page comes back. One retry is "
                         "usually worth it. Each attempt is a separate billable task, so "
                         "this defaults to 1.")
-    p.add_argument("--retry-delay", type=int, default=10,
+    p.add_argument("--retry-delay", type=_nonneg_int, default=10,
                    help="Seconds between retries (default 10)")
     p.add_argument("--dump-html", default=None,
                    help="Also write the raw returned HTML to this path (always, even on success)")
