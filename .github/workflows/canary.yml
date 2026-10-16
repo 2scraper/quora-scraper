@@ -60,6 +60,10 @@ on:
     # 06:20 UTC. Off the hour, because everything else in the world runs on
     # it and a queued runner adds nothing but latency.
     - cron: "20 6 * * *"
+    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
+    # captcha key). On the daily run above those secrets read as empty, so
+    # it takes the free no-secret route and bills nothing.
+    - cron: "20 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -72,7 +76,7 @@ jobs:
     env:
       # `secrets` is not available in a job-level `if`, so presence is tested
       # through the job env and read in each step's condition.
-      HAVE_PROXY: ${{ secrets.QUORA_PROXY != '' }}
+      HAVE_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '20 6 * * 1') && secrets.QUORA_PROXY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -103,7 +107,7 @@ jobs:
         # stops the step from failing the job; it does not touch errexit.
         continue-on-error: true
         env:
-          QUORA_PROXY: ${{ secrets.QUORA_PROXY }}
+          QUORA_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '20 6 * * 1') && secrets.QUORA_PROXY || '' }}
         run: |
           set +e
           xvfb-run -a python3 playwright_scraper.py \
@@ -347,7 +351,7 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         env:
-          QUORA_PROXY: ${{ secrets.QUORA_PROXY }}
+          QUORA_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '20 6 * * 1') && secrets.QUORA_PROXY || '' }}
         run: |
           set +e
           xvfb-run -a python3 playwright_scraper.py \
