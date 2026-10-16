@@ -12,6 +12,8 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-16
+
 > **Behaviour changes in this batch.** (1) A page whose answers were counted
 > but parsed to zero rows now ends the run with `stop_reason:
 > parser_found_nothing` and **exit 5** (or 6 after earlier batches), not
@@ -27,7 +29,23 @@ bad default or violating the promise quietly.
 > apostrophe; JSON is unchanged. (5) The canary now fails when it did not
 > parse real rows.
 
-### Fixed (third-party audit, 2026-10-14)
+> **`--retries 0` is now refused (exit 2).** The page-load loop is
+> `range(1, retries + 1)`, so 0 never meant "no retries": it meant no
+> navigation attempt at all. `--retries` counts ATTEMPTS, the minimum is 1,
+> and `--help` now says it is not a cap on total requests, because a page the
+> site refuses is retried under its own, separate budget.
+
+> **Correction to a claim in earlier READMEs.** They said a managed
+> Cloudflare challenge "carries no sitekey … so there is nothing for a
+> captcha solver to answer". The measurement was right and the conclusion was
+> not. Cloudflare passes `sitekey`, `action`, `cData` and `chlPageData` to
+> `turnstile.render()` once and keeps nothing, so the absence is a fact about
+> the MARKUP; the arguments can be captured with an init script and 2Captcha
+> solves the result as `TurnstileTaskProxyless`. The sentence read as "a
+> 2Captcha key would not help you here", which is a claim about the product
+> and was wrong.
+
+### Fixed
 
 - **One paid solve per page, at every call site.** Each engine checks for a
   captcha twice per attempt — before classifying the page and after — and
@@ -73,25 +91,6 @@ bad default or violating the promise quietly.
   bare runner and the badge stayed green. Any run that did not parse real
   rows is now red, with the reason and the fix (`QUORA_PROXY`) in the log.
 - Comments and docs no longer cite private section numbers.
-
-> **Correction to a claim in earlier READMEs.** They said a managed
-> Cloudflare challenge "carries no sitekey … so there is nothing for a
-> captcha solver to answer". The measurement was right and the conclusion was
-> not. Cloudflare passes `sitekey`, `action`, `cData` and `chlPageData` to
-> `turnstile.render()` once and keeps nothing, so the absence is a fact about
-> the MARKUP; the arguments can be captured with an init script and 2Captcha
-> solves the result as `TurnstileTaskProxyless`. The sentence read as "a
-> 2Captcha key would not help you here", which is a claim about the product
-> and was wrong.
-
-### Fixed
-
-> **`--retries 0` is now refused (exit 2).** The page-load loop is
-> `range(1, retries + 1)`, so 0 never meant "no retries": it meant no
-> navigation attempt at all. `--retries` counts ATTEMPTS, the minimum is 1,
-> and `--help` now says it is not a cap on total requests, because a page the
-> site refuses is retried under its own, separate budget.
-
 - **A scroll cut off by its round budget is no longer reported as settled.**
   All three engines wrote `"settled": true` whatever ended the loop. The
   sidecar's scroll trace now carries `stopped_by` (`stable`, `target` or
@@ -325,5 +324,7 @@ metadata, no tests and no exit-code contract; none of that code survives.
 - `--fingerprint` and `--locale` exist on Playwright and Selenium and not on
   pyppeteer. The offline suite asserts that difference.
 
-[Unreleased]: https://github.com/2scraper/quora-scraper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/2scraper/quora-scraper/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/2scraper/quora-scraper/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/2scraper/quora-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/quora-scraper/releases/tag/v0.1.0
