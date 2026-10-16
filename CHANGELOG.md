@@ -12,6 +12,12 @@ bad default or violating the promise quietly.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: the canary's optional paid secret `QUORA_PROXY` now reaches it only on a new weekly
+  run (Mondays 06:20 UTC) and on a manual dispatch. The daily run keeps its
+  schedule and takes the free route without them, so it bills nothing.
+
 ## [0.2.0] — 2026-10-16
 
 > **Behaviour changes in this batch.** (1) A page whose answers were counted
