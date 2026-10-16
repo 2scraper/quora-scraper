@@ -444,7 +444,7 @@ Author names, profile slugs, credentials, answer bodies and cited links are
 replaced with placeholders first; question titles, ids, counts, timestamps and
 Quora's own markup stay verbatim.
 
-`canary.yml` runs two real runs daily — a question URL for the inline-payload
+`canary.yml` runs two real runs weekly (Mondays) — a question URL for the inline-payload
 path and a topic URL for the DOM-only one — and asserts that each behaves the
 way this README says it does. A run that did not parse real rows (blocked,
 never got its content, partial, or empty) turns the badge red rather than
