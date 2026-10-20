@@ -53,12 +53,13 @@ from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
 from product_parser import (parse_answers, SELECTORS, PAGE_CAP,
                             detect_bot_challenge, listing_kind, normalize_url,
                             served_by_quora, source_of, unsupported_reason)
-from output_writer import dedupe_by_key, finish_run
+from output_writer import dedupe_by_key, finish_run, finish_without_fetch
 import page_flow
 import product_parser
 from proxy_pool import (from_args as proxy_pool_from_args, split_credentials,
                         mask, ROTATE_MODES, ProxyError)
 import env_config
+import proxy_check
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -269,6 +270,8 @@ class _Session:
         if credentials:
             self.bridge.run(self.page.authenticate(
                 {"username": credentials[0], "password": credentials[1]}))
+        if proxy_check.block_media(self.args, self.pool, remote=False):
+            self.bridge.run(proxy_check.install_pyppeteer(self.page))
         _watch_graphql(self)
         return self
 
@@ -745,6 +748,16 @@ def scrape(args) -> int:
         logger.warning("--concurrency %d is ignored (running one worker): %s.", args.concurrency,
                        page_flow.concurrency_refusal(args.url))
 
+    # One request through the proxy before a browser exists: a 407 or 402
+    # from the gateway ends the run here, in seconds, instead of surfacing
+    # as a navigation timeout after every retry.
+    refused = proxy_check.gate(pool, args.url)
+    if refused:
+        return finish_without_fetch(
+            args.out, stop_reason=refused.stop_reason,
+            pages_requested=args.pages, start_url=args.url, mode=args.mode,
+            source=source_of(args.url))
+
     bridge = _AsyncBridge()
     session = _Session(bridge, args, pool).open()
     try:
@@ -937,6 +950,7 @@ def parse_args():
                         "to be retried, and nothing is charged.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score (0.3, 0.7 or 0.9).")
+    proxy_check.add_media_flags(p)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Connect to a running browser over CDP, e.g. "
                         "ws://user:pass@host:port. pyppeteer authenticates on "
