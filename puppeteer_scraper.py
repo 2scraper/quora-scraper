@@ -181,6 +181,9 @@ class PageOutcome:
     answers_available: Optional[int] = None
     gap: Optional[int] = None
     scroll: Optional[dict] = None
+    # The driver's own words for the last failed navigation (first line,
+    # credentials masked). See the Playwright engine.
+    load_error: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -194,6 +197,12 @@ _CREDENTIALS_IN_URL_RE = re.compile(r"([a-z][a-z0-9+.\-]*://)[^\s/@]+:[^\s/@]+@"
 def _mask_credentials(text: str) -> str:
     """`text` with any username:password in an embedded URL replaced."""
     return _CREDENTIALS_IN_URL_RE.sub(r"\1***:***@", text or "")
+
+
+def _load_error_text(exc) -> str:
+    """The first line of a navigation error, credentials masked."""
+    lines = str(exc).strip().splitlines()
+    return _mask_credentials(lines[0] if lines else type(exc).__name__)[:200]
 
 
 def _chrome_ua(version: str) -> str:
@@ -481,6 +490,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
     # judges by the document alone.
     http_status = None
     html, state, load_failed = None, "ok", False
+    load_error = None
 
     for block_attempt in range(block_retries + 1):
         load_failed = False
@@ -498,11 +508,14 @@ def _fetch_one_page(session, args, pool, page_num: int,
                     break
                 except Exception as e:  # noqa: BLE001
                     load_failed = True
+                    load_error = _load_error_text(e)
                     if attempt < args.retries:
                         pause = args.retry_delay * (2 ** (attempt - 1))
-                        logger.warning("Timeout loading %s (attempt %d/%d: "
-                                       "%s) — retrying in %.1fs.", url,
-                                       attempt, args.retries, str(e)[:120],
+                        logger.warning("%s loading %s (attempt %d/%d: "
+                                       "%s) — retrying in %.1fs.",
+                                       "Timeout" if type(e).__name__ == "TimeoutError"
+                                       else "Navigation failed",
+                                       url, attempt, args.retries, load_error,
                                        pause)
                         time.sleep(pause)
         else:
@@ -616,8 +629,10 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 break
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        logger.error("Gave up loading %s after %d attempt(s): %s", url,
+                     args.retries, load_error or "no error text")
         outcome.load_failed = True
+        outcome.load_error = load_error
         return outcome
 
     outcome.state = state
@@ -869,6 +884,7 @@ def scrape(args) -> int:
         "inline_payload_rows": sum(1 for r in all_rows
                                    if r.data_source != "dom"),
         "pagination": "infinite-scroll",
+        "load_error": next((o.load_error for o in outcomes if o.load_error), None),
     }
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
