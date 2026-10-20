@@ -275,13 +275,15 @@ null on every row of every run of every mode is worse than six missing ones.
 | 2 | bad usage |
 | 3 | blocked — Cloudflare's challenge survived the retries |
 | 4 | ran fine, the site served the feed, and it held nothing |
-| 5 | the content was never obtained: a remote API error, a navigation timeout, a dead proxy, a refused batch, an address that answered 404, or a page that held answers and parsed to none (`stop_reason: parser_found_nothing`, a parser bug rather than an empty feed) |
+| 5 | the content was never obtained: a remote API error, a navigation timeout, a dead proxy, a proxy that refused the credential or the balance before the run began (`stop_reason: proxy_auth_failed` / `proxy_balance_exhausted`), a refused batch, an address that answered 404, or a page that held answers and parsed to none (`stop_reason: parser_found_nothing`, a parser bug rather than an empty feed) |
 | 6 | partial — see `stop_reason` in the sidecar |
 
 `<out>.meta.json` records `status`, `stop_reason`, which batches failed *by
 number*, the scroll trace, `rows_new_per_batch`, `answers_available` and
 `inline_payload_rows`. A **failed** run writes no sidecar, so a `"failed"`
-file can never sit beside good data.
+file can never sit beside good data. The one exception is a run the proxy
+pre-check stopped: it writes `<out>.latest_attempt.meta.json`, a separate
+file, and leaves `<out>.meta.json` alone.
 
 ### Diffing two runs
 
@@ -331,6 +333,32 @@ Known limits, stated rather than left to be discovered:
 - `--fingerprint` and `--locale` exist on Playwright and Selenium and not on
   pyppeteer. The offline suite asserts that difference, so closing it needs a
   README edit rather than a quiet patch.
+
+### Proxy traffic savers
+
+A proxy is billed by traffic, so a run through `--proxy` / `--proxy-file` /
+`QUORA_PROXY` does two things to avoid paying for bytes it does not use:
+
+- **One pre-check before any browser starts.** A CONNECT through the proxy
+  and a `HEAD /robots.txt` on the target host. Chromium reports a proxy's
+  HTTP 407 as a navigation timeout, so a wrong or exhausted credential used
+  to spend every retry before ending as `page_load_timeout`. Now a **407**
+  (the gateway refused the credential, or the traffic balance is exhausted)
+  or a **402** (proxy traffic/balance exhausted) ends the run in seconds with
+  **exit 5** and `<out>.latest_attempt.meta.json` saying `status: failed`,
+  `stop_reason: proxy_auth_failed` (or `proxy_balance_exhausted`). Any
+  previous output and its `.meta.json` are left as they were. The message
+  names the variable and never prints the credential. If the proxy does not
+  answer at all, the run goes on as before and the browser makes its own
+  attempt. No pre-check runs without a proxy or with `--cdp-endpoint`.
+- **Images, video/audio and web fonts are not downloaded** through a local
+  proxy: all three engines abort those requests (Playwright by resource type,
+  pyppeteer through CDP's Fetch domain, Selenium by file extension with CDP
+  `Network.setBlockedURLs`). Nothing this scraper reads is in them. Measured
+  2026-10-20 on one question page, with no proxy and blocking forced on:
+  262 rows either way, the same 30 fields, and the same non-null count in
+  every field. `--load-media` (or `QUORA_LOAD_MEDIA=1`) loads them. Without a
+  proxy, or over `--cdp-endpoint`, nothing is blocked.
 
 ---
 
