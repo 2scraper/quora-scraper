@@ -173,6 +173,10 @@ class PageOutcome:
     # a floor rather than the whole feed, and a run that reported it as
     # complete would read as a shrinking catalogue.
     scroll: Optional[dict] = None
+    # The browser's own words for the last failed navigation (first line,
+    # credentials masked), so a load that failed in 60 ms is not reported as
+    # a timeout with nothing to say why.
+    load_error: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -531,6 +535,16 @@ def _mask_credentials(text: str) -> str:
     return _CREDENTIALS_IN_URL_RE.sub(r"\1***:***@", text or "")
 
 
+def _load_error_text(exc) -> str:
+    """The first line of a navigation error, credentials masked.
+
+    Playwright's message runs on into a multi-line call log; its first line
+    carries the reason (`net::ERR_...` or `Timeout 60000ms exceeded`).
+    """
+    lines = str(exc).strip().splitlines()
+    return _mask_credentials(lines[0] if lines else type(exc).__name__)[:200]
+
+
 def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     """page.content() that tolerates a page mid-navigation.
 
@@ -719,6 +733,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     # judges by the document alone.
     http_status = None
     html, state, load_failed = None, "ok", False
+    load_error = None
 
     for block_attempt in range(block_retries + 1):
         load_failed, exit_failed = False, None
@@ -741,6 +756,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     # catching only the latter lets it escape as a traceback,
                     # which is the likeliest failure the first time anyone
                     # points --proxy-file at a real list.
+                    load_error = _load_error_text(e)
                     reason = _proxy_failure(e)
                     if reason:
                         exit_failed, load_failed = reason, True
@@ -748,9 +764,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     load_failed = True
                     if attempt < args.retries:
                         pause = args.retry_delay * (2 ** (attempt - 1))
-                        logger.warning("Timeout loading %s (attempt %d/%d) — "
-                                       "retrying in %.1fs.", url, attempt,
-                                       args.retries, pause)
+                        # Only a PWTimeout is a timeout. Any other PWError
+                        # (an exit that drops the tunnel, a refused
+                        # connection) fails in milliseconds and used to be
+                        # logged as "Timeout" with no reason at all.
+                        logger.warning("%s loading %s (attempt %d/%d: %s) — "
+                                       "retrying in %.1fs.",
+                                       "Timeout" if isinstance(e, PWTimeout)
+                                       else "Navigation failed",
+                                       url, attempt, args.retries, load_error,
+                                       pause)
                         time.sleep(pause)
         else:
             logger.info("Extending the feed to batch %d/%d by scrolling "
@@ -911,8 +934,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                 break
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        logger.error("Gave up loading %s after %d attempt(s): %s", url,
+                     args.retries, load_error or "no error text")
         outcome.load_failed = True
+        outcome.load_error = load_error
         return outcome
 
     outcome.state = state
@@ -1256,6 +1281,9 @@ def scrape(args) -> int:
         # pagination model before comparing anything: a "page" here is a
         # scroll batch, not an address.
         "pagination": "infinite-scroll",
+        # The browser's reason for the first page that never loaded, so a
+        # sidecar saying page_load_timeout also says what actually failed.
+        "load_error": next((o.load_error for o in outcomes if o.load_error), None),
     }
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,

@@ -38,6 +38,7 @@ bad default or violating the promise quietly.
 
 ### Changed
 
+- A page that never loads is now logged with the browser's own reason, in all three engines. Before, Playwright logged every failed navigation as "Timeout loading ..." with no reason, even when the error came 64 ms after the navigation started (canary 2026-10-20, topic run through `QUORA_PROXY`). Now a real timeout still reads "Timeout loading", any other navigation error reads "Navigation failed loading", and both include the error's first line with proxy credentials masked. The sidecar gains `load_error`: the reason for the first page that never loaded, or `null`. Exit codes and `stop_reason` are unchanged.
 - CI only: the canary now runs weekly (Mondays 06:20 UTC) and on a manual dispatch, with its optional secret `QUORA_PROXY` passed on every run; the daily schedule is removed.
 
 ## [0.2.0] — 2026-10-16

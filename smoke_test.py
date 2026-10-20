@@ -2264,17 +2264,17 @@ class _StubChallenge:
     kind, source, sitekey, action = "recaptcha-v2", "stub", "stub-key", None
 
 
-def _stub_args(tmp):
+def _stub_args(tmp, retries=1):
     import argparse
     return argparse.Namespace(
-        retries=1, pages=1, retry_delay=0.0, delay=0.0, proxy_block_retries=2,
+        retries=retries, pages=1, retry_delay=0.0, delay=0.0, proxy_block_retries=2,
         mode="topic", out=os.path.join(tmp, "out"), dump_html=None,
         headless=True, solve_captcha="when-blocked",
         twocaptcha_key="stub-not-a-key", captcha_api="v2", min_score=0.7)
 
 
 def _drive_engine(engine, state, detections=None, solver_raises=False,
-                  rows=None, status=None):
+                  rows=None, status=None, goto_raises=None, retries=1):
     """Run one `_fetch_one_page` with every driver primitive stubbed.
 
     Returns (outcome, solver purchases). Nothing reaches the network: the
@@ -2299,6 +2299,12 @@ def _drive_engine(engine, state, detections=None, solver_raises=False,
     goto_response.status = status
     session.page.goto.return_value = goto_response
     session.bridge.run.return_value = goto_response
+    if goto_raises is not None:
+        # Every navigation fails with this error (pyppeteer's goto goes
+        # through bridge.run, Selenium's through driver.get).
+        session.page.goto.side_effect = goto_raises
+        session.bridge.run.side_effect = goto_raises
+        session.driver.get.side_effect = goto_raises
     patches = {
         "detect_recaptcha_v3": lambda *a, **k: None,
         "detect_recaptcha_in_page": lambda *a, **k: None,
@@ -2318,12 +2324,71 @@ def _drive_engine(engine, state, detections=None, solver_raises=False,
             setattr(engine, n, v)
         with tempfile.TemporaryDirectory() as tmp:
             outcome = engine._fetch_one_page(
-                session, _stub_args(tmp), None, 1,
+                session, _stub_args(tmp, retries), None, 1,
                 "https://www.quora.com/topic/Machine-Learning")
     finally:
         for n, v in saved.items():
             setattr(engine, n, v)
     return outcome, len(purchases)
+
+
+def _navigation_errors(name):
+    """(instant failure, timeout) exceptions as `name`'s driver raises them.
+
+    The texts follow Chromium's format. The first one carries a credential
+    in a URL, which must never reach a log or the sidecar."""
+    instant = ("Page.goto: net::ERR_CONNECTION_CLOSED at "
+               "https://www.quora.com/topic/Machine-Learning via "
+               "http://" + "canary-login" + ":" + "not-a-real-pass"
+               + "@proxy.invalid:8080\n"
+               "Call log:\n  - navigating to "
+               "\"https://www.quora.com/topic/Machine-Learning\"")
+    if name == "playwright_scraper":
+        from playwright.sync_api import Error, TimeoutError as PWTimeout
+        return Error(instant), PWTimeout("Page.goto: Timeout 60000ms exceeded.")
+    if name == "selenium_scraper":
+        from selenium.common.exceptions import (TimeoutException,
+                                                WebDriverException)
+        return (WebDriverException(instant),
+                TimeoutException("timeout: Timed out receiving message from renderer"))
+    return RuntimeError(instant), TimeoutError("Navigation Timeout Exceeded: 60000 ms exceeded.")
+
+
+def _check_load_error_reported(name, engine):
+    """A navigation that fails instantly is logged with its reason and not
+    as a timeout; the reason reaches the outcome, credentials masked.
+
+    The 2026-10-20 canary logged four "Timeout loading" lines 64 ms after
+    the navigation started, with no reason, and wrote a sidecar that said
+    page_load_timeout and nothing more."""
+    import io
+    import logging
+    instant, timeout = _navigation_errors(name)
+    ok = True
+    for exc, label in ((instant, "Navigation failed loading"),
+                       (timeout, "Timeout loading")):
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        engine.logger.addHandler(handler)
+        try:
+            oc, bought = _drive_engine(engine, "content", goto_raises=exc,
+                                       retries=2)
+        finally:
+            engine.logger.removeHandler(handler)
+        log = stream.getvalue()
+        first = str(exc).splitlines()[0].replace(
+            "canary-login" + ":" + "not-a-real-pass" + "@", "***:***@")
+        ok &= check(f"{name}: {type(exc).__name__} on every navigation -> "
+                    f"load_failed with the reason on the outcome",
+                    oc.load_failed and oc.load_error == first[:200]
+                    and bought == 0)
+        ok &= check(f"{name}: {type(exc).__name__} is logged as "
+                    f"'{label}' with its reason, and gives up naming it",
+                    label in log and log.count(first[:200]) == 2
+                    and ("Timeout loading" in log) == (label == "Timeout loading"))
+        ok &= check(f"{name}: no credential in the log or the outcome",
+                    "not-a-real-pass" not in log + (oc.load_error or ""))
+    return ok
 
 
 def _citation_tokens():
@@ -2404,6 +2469,7 @@ def test_audit_2026_10_14(skips):
         ok &= check(f"{name}: a 404 is not_found, not parsed, not blocked",
                     oc.state == "not_found" and not oc.products
                     and oc.blocked_by is None)
+        ok &= _check_load_error_reported(name, engine)
 
     # -- the engines map those states to the right stop reasons -------------
     for name in ENGINES:
@@ -2413,6 +2479,9 @@ def test_audit_2026_10_14(skips):
                     src.count('stop_reason = "parser_found_nothing"') == 2)
         ok &= check(f"{name}: not_found has its own stop reason",
                     'stop_reason = "not_found"' in src)
+        ok &= check(f"{name}: the sidecar carries the first page's load_error",
+                    '"load_error": next((o.load_error for o in outcomes '
+                    'if o.load_error), None)' in src)
         ok &= check(f"{name}: the navigation status reaches the classifier",
                     src.count("_classify(session.page, html, http_status)"
                               if name == "playwright_scraper" else
