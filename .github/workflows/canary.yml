@@ -128,7 +128,11 @@ jobs:
       - name: Interpret the exit code
         id: verdict
         # A canary that did not parse real rows did not test the site, and
-        # it is not reported as a pass whatever the reason.
+        # it is not reported as a pass whatever the reason. Runs even when
+        # the proxy-traffic step above failed (budget exceeded): that step
+        # already fails the job, and this one still reports the run's own
+        # verdict instead of being skipped.
+        if: ${{ !cancelled() && steps.run.outcome != 'skipped' }}
         run: |
           set -e
           code="${{ steps.run.outputs.exit_code }}"
