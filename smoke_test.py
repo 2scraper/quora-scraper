@@ -3862,6 +3862,22 @@ def test_canary_reports_proxy_traffic():
                 f"after a failed step (runs {sorted(outs)}, reported "
                 f"{sorted(reported)})", bool(outs) and outs <= reported)
 
+    # A step that judges a run's exit code comes after that run's proxy-traffic
+    # step, which fails when the budget was exceeded. Without !cancelled() /
+    # always() GitHub skips it then, and the run's own verdict is never shown.
+    judges = [s for s in steps if ".outputs.exit_code" in s
+              and "--out" not in s]
+    unguarded = [s.strip().splitlines()[0] for s in judges
+                 if not re.search(r"^\s*if:.*(!cancelled\(\)|always\(\))",
+                                  s, re.M)]
+    ok &= check(f"every exit-code verdict step runs after a failed proxy-"
+                f"traffic step ({len(judges)} step(s), unguarded "
+                f"{unguarded or 'none'})", len(judges) >= 3 and not unguarded)
+    verdict = [s for s in steps if s.strip().startswith("Interpret the exit code")]
+    ok &= check("the question run's 'Interpret the exit code' step is one of "
+                "them", len(verdict) == 1 and verdict[0] in judges
+                and "Interpret the exit code" not in unguarded)
+
     script = os.path.join(REPO_ROOT, ".github", "proxy_traffic.py")
     with tempfile.TemporaryDirectory() as tmp:
         summary = os.path.join(tmp, "summary.md")
