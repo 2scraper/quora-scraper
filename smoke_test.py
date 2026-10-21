@@ -3844,9 +3844,12 @@ def test_canary_reports_proxy_traffic():
     steps = re.split(r"\n\s*- (?:name|uses):", text)
     runs = [s for s in steps if re.search(r"\w+_scraper\.py", s)
             and "--out" in s]
-    ok &= check(f"every canary scrape passes --proxy-budget-mb 10 "
+    # The canary's budget (25 MB) is set above the scraper's default (10 MB):
+    # on 2026-10-21 a question run hit the 10 MB cap with media blocked.
+    ok &= check(f"every canary scrape passes --proxy-budget-mb 25 "
                 f"({len(runs)} run step(s))", bool(runs) and all(
-                    "--proxy-budget-mb 10" in r for r in runs))
+                    re.search(r"--proxy-budget-mb 25(?!\d)", r)
+                    for r in runs))
     outs = set()
     for r in runs:
         outs.update(re.findall(r"--out\s+(\S+)", r))
@@ -3870,6 +3873,9 @@ def test_canary_reports_proxy_traffic():
                 ("under", {"proxy_bytes": 2_340_000,
                            "proxy_budget_bytes": 10_000_000,
                            "proxy_budget_exceeded": False}),
+                ("canary", {"proxy_bytes": 26_100_000,
+                            "proxy_budget_bytes": 25_000_000,
+                            "proxy_budget_exceeded": True}),
                 ("plain", {"status": "complete"}),
                 ("missing", None)):
             out = os.path.join(tmp, case)
@@ -3891,6 +3897,11 @@ def test_canary_reports_proxy_traffic():
                 results["under"][0] == 0
                 and "**live/under**: proxy traffic 2.3 MB of 10 MB" in written
                 and "**live/over**: proxy traffic 12.3 MB of 10 MB" in written)
+    rc, out = results["canary"]
+    ok &= check(f"the budget text comes from the sidecar's proxy_budget_bytes, "
+                f"not a fixed 10 MB: '25 MB' (rc={rc})", rc == 1
+                and "::error::stopped: proxy budget 25 MB exceeded" in out
+                and "**live/canary**: proxy traffic 26.1 MB of 25 MB" in written)
     ok &= check("no proxy fields / no sidecar: reported, not a crash",
                 results["plain"][0] == 0 and results["missing"][0] == 0
                 and "not metered" in written and "unknown" in written)
