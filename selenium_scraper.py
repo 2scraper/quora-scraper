@@ -58,6 +58,7 @@ from proxy_pool import (from_args as proxy_pool_from_args, split_credentials,
                         mask, ROTATE_MODES, ProxyError)
 import env_config
 import proxy_check
+import proxy_meter
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -212,6 +213,9 @@ class _Session:
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         self.driver = webdriver.Chrome(options=options)
+        # Before the first read of the performance log: the meter is fed
+        # from that log, by whichever reader drains it.
+        proxy_meter.install_selenium(self.driver, proxy_meter.of(self.args))
         self._apply_timeouts()
         _watch_graphql(self)
         if proxy_check.block_media(self.args, self.pool, remote=False):
@@ -278,6 +282,8 @@ class _Session:
     def close(self):
         try:
             if self.driver is not None:
+                # The last page's traffic is still in the performance log.
+                _graphql_refused_count(self)
                 # quit(), not close(): close() ends one window and leaves the
                 # driver process running, which on a per-page rotation would
                 # leak a chromedriver per page.
@@ -365,10 +371,9 @@ def _graphql_refused_count(session) -> int:
     """
     import json as _json
     total = getattr(session, "_graphql_refused", 0)
-    try:
-        entries = session.driver.get_log("performance")
-    except Exception:  # noqa: BLE001 — an absent log must never break a run
-        return total
+    # Through proxy_meter: the log is drained on read, and the proxy meter
+    # counts bytes from the same entries.
+    entries = proxy_meter.selenium_log(session.driver)
     for entry in entries:
         try:
             message = _json.loads(entry.get("message", "{}"))["message"]
@@ -524,9 +529,12 @@ def _fetch_one_page(session, args, pool, page_num: int,
         if url is not None:
             logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
             for attempt in range(1, args.retries + 1):
+                _graphql_refused_count(session)   # feeds the proxy meter
+                proxy_meter.check(args)
                 try:
                     session.driver.get(url)
                     load_failed = False
+                    _graphql_refused_count(session)
                     break
                 except (TimeoutException, WebDriverException) as e:
                     load_failed = True
@@ -545,6 +553,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
                         "(this listing has no batch-%d address).",
                         page_num, args.pages, page_num)
             refused_before = _graphql_refused_count(session)
+            proxy_meter.check(args)
             turn = page_flow.advance_feed(
                 lambda: _scroll_to_bottom(session),
                 lambda sel: _count(session, sel),
@@ -797,6 +806,7 @@ def scrape(args) -> int:
             args.out, stop_reason=refused.stop_reason,
             pages_requested=args.pages, start_url=args.url, mode=args.mode,
             source=source_of(args.url))
+    meter = proxy_meter.start(args, pool, remote=bool(args.cdp_endpoint))
 
     session = _Session(args, pool).open()
     try:
@@ -861,8 +871,15 @@ def scrape(args) -> int:
                                 page_num)
                     stop_reason = "no_new_products"
                     break
+    except proxy_meter.ProxyBudgetExceeded as e:
+        logger.error("Stopping: %s. The batches already gathered are kept.", e)
     finally:
         session.close()
+
+    # Over budget is the stop reason whatever the loop concluded: the
+    # requests after the cap were refused, so nothing after it was read.
+    if meter is not None and meter.exceeded:
+        stop_reason, blocked = proxy_meter.STOP_BUDGET_EXCEEDED, False
 
     all_rows = []
     merged_seen = set()
@@ -907,6 +924,7 @@ def scrape(args) -> int:
         "pagination": "infinite-scroll",
         "load_error": next((o.load_error for o in outcomes if o.load_error), None),
     }
+    extra = proxy_meter.finish(args, extra)
 
     return finish_run(all_rows, args.out, args.format, args.allow_empty,
                       blocked=blocked, stop_reason=stop_reason,
@@ -1003,6 +1021,7 @@ def parse_args():
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score (0.3, 0.7 or 0.9).")
     proxy_check.add_media_flags(p)
+    proxy_meter.add_budget_flag(p)
     p.add_argument("--cdp-endpoint", default=None,
                    help="Attach to a running browser at host:port. NOTE: "
                         "Selenium cannot use an AUTHENTICATED endpoint — "

@@ -43,6 +43,7 @@ ENV_KEYS = {
     "QUORA_URL": "url",
     # "1" keeps images/video/fonts loading through a proxy (--load-media).
     "QUORA_LOAD_MEDIA": "load_media",
+    "QUORA_PROXY_BUDGET_MB": "proxy_budget_mb",
 }
 # Deliberately NOT here: an output prefix. `--out` already carries a non-empty
 # default, so `apply()` would never see it as unset and the variable would be
