@@ -504,6 +504,13 @@ never got its content, partial, or empty) turns the badge red rather than
 green: from a shared GitHub runner Cloudflare's rate-based challenge does
 refuse some days, and a `QUORA_PROXY` secret is what makes those days testable.
 
+Both canary runs pass `--proxy-budget-mb 25`, above the scraper's own 10 MB
+default, which is unchanged. Measured 2026-10-21 through `QUORA_PROXY`: a
+question run (3 pages) reached the 10 MB cap with images, video/audio and
+fonts already blocked, so a 10 MB canary would stop on a healthy page. The
+step summary shows each run's traffic against the budget recorded in its
+sidecar, and a run that hits 25 MB still fails the job.
+
 ---
 
 ## Scope and licence

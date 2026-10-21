@@ -109,13 +109,16 @@ jobs:
           xvfb-run -a python3 playwright_scraper.py \
             --url "https://www.quora.com/What-is-machine-learning-4" \
             --pages 3 --delay 20 --retries 4 --retry-delay 30 \
-            --proxy-budget-mb 10 \
+            --proxy-budget-mb 25 \
             --out canary_question --dump-html canary_question.html
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Proxy traffic of the question run
         # Through QUORA_PROXY the run meters what it sends and stops at
-        # --proxy-budget-mb 10. This puts the figure in the step summary and
+        # --proxy-budget-mb 25 (the scraper's own default stays 10 MB; on
+        # 2026-10-21 a question run hit the 10 MB cap with media already
+        # blocked). This puts the figure, and the budget read from the
+        # sidecar, in the step summary and
         # fails the job when the cap was hit, so a page that has grown heavy
         # is a red run rather than a quietly larger bill. Without the secret
         # there is no local proxy and it says "not metered".
@@ -363,7 +366,7 @@ jobs:
           xvfb-run -a python3 playwright_scraper.py \
             --url "https://www.quora.com/topic/Machine-Learning" \
             --pages 1 --delay 20 --retries 4 --retry-delay 30 \
-            --proxy-budget-mb 10 \
+            --proxy-budget-mb 25 \
             --out canary_topic --dump-html canary_topic.html
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
