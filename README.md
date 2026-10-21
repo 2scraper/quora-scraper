@@ -275,15 +275,16 @@ null on every row of every run of every mode is worse than six missing ones.
 | 2 | bad usage |
 | 3 | blocked — Cloudflare's challenge survived the retries |
 | 4 | ran fine, the site served the feed, and it held nothing |
-| 5 | the content was never obtained: a remote API error, a navigation timeout, a dead proxy, a proxy that refused the credential or the balance before the run began (`stop_reason: proxy_auth_failed` / `proxy_balance_exhausted`), a refused batch, an address that answered 404, or a page that held answers and parsed to none (`stop_reason: parser_found_nothing`, a parser bug rather than an empty feed) |
-| 6 | partial — see `stop_reason` in the sidecar |
+| 5 | the content was never obtained: a remote API error, a navigation timeout, a dead proxy, a proxy that refused the credential or the balance before the run began (`stop_reason: proxy_auth_failed` / `proxy_balance_exhausted`), the proxy budget spent before any row (`proxy_budget_exceeded`), a refused batch, an address that answered 404, or a page that held answers and parsed to none (`stop_reason: parser_found_nothing`, a parser bug rather than an empty feed) |
+| 6 | partial — see `stop_reason` in the sidecar (`proxy_budget_exceeded` when `--proxy-budget-mb` stopped it) |
 
 `<out>.meta.json` records `status`, `stop_reason`, which batches failed *by
 number*, the scroll trace, `rows_new_per_batch`, `answers_available` and
 `inline_payload_rows`. A **failed** run writes no sidecar, so a `"failed"`
 file can never sit beside good data. The one exception is a run the proxy
 pre-check stopped: it writes `<out>.latest_attempt.meta.json`, a separate
-file, and leaves `<out>.meta.json` alone.
+file, and leaves `<out>.meta.json` alone. A run through a local proxy
+always writes that file too, with its proxy traffic, rows or not.
 
 ### Diffing two runs
 
@@ -359,6 +360,30 @@ A proxy is billed by traffic, so a run through `--proxy` / `--proxy-file` /
   262 rows either way, the same 30 fields, and the same non-null count in
   every field. `--load-media` (or `QUORA_LOAD_MEDIA=1`) loads them. Without a
   proxy, or over `--cdp-endpoint`, nothing is blocked.
+- **Every run is metered and capped.** `--proxy-budget-mb` (default **10**,
+  `0` = no cap, also `QUORA_PROXY_BUDGET_MB`). Once more than that has gone
+  through the proxy, further requests are refused, the run stops before its
+  next navigation or scroll, keeps the rows it has and exits **6** (or **5**
+  with no rows), `stop_reason: proxy_budget_exceeded`. It never carries on
+  past the cap. The sidecars (`<out>.meta.json`, and
+  `<out>.latest_attempt.meta.json`, which every metered run writes) carry
+  `proxy_bytes`, `proxy_budget_bytes` (`null` with no cap) and
+  `proxy_budget_exceeded`, and the log ends with
+  `Proxy traffic: X.X MB of Y MB budget`.
+
+How the bytes are counted, per engine: Playwright sums `request.sizes()`
+(request headers + body, response headers + body) of every finished or
+failed request; pyppeteer reads CDP `Network.loadingFinished.encodedDataLength`
+(bytes received, headers included) plus each request's line, headers and
+body from `Network.requestWillBeSent`; Selenium reads the same CDP events
+from chromedriver's performance log after each page and scroll. The figure
+is an **estimate of the payload through the tunnel**: TLS, the CONNECT
+exchange and connections the browser opens for itself are not visible to any
+of the engines, and add a few percent. Measured 2026-10-21 against a local
+stub proxy that counted every byte it carried (a 60 kB page, a 30 kB
+stylesheet, a 90 kB script): Playwright within 0.2%, pyppeteer 0.6%,
+Selenium 0.7%. A megabyte here is 10^6 bytes. Nothing is metered without a
+proxy or over `--cdp-endpoint`.
 
 ---
 
