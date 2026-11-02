@@ -1,4 +1,4 @@
-# quora-scraper
+# Quora Scraper — Answers, Upvotes and Views in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/quora-scraper?sort=semver)](https://github.com/2scraper/quora-scraper/releases)
 [![tests](https://github.com/2scraper/quora-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/quora-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20pyppeteer-lightgrey)](#engines)
 [![runs without an account](https://img.shields.io/badge/runs%20without-an%20account-brightgreen)](#do-you-need-any-of-the-paid-products)
+
+**Quora scraper** — an open-source (MIT) Python tool that reads Quora question pages, topic feeds and profiles on all twenty-four of its language sites, and writes one row per answer — author, text and, from question and profile pages, upvotes, views and creation time — to JSON or CSV. On 2026-09-15 a datacentre address with no key and no proxy was served the full feed on eight of the first fourteen fetches, and everything after that from the same address was challenged, so the request rate per address is the limit. Use it to build a dataset of answers to a question or by one author, or compare two runs with `diff_runs.py`.
 
 Scrapes **Quora answers** — off a topic feed, a question page or a profile —
 into JSON or CSV with a stable column schema, a run-metadata sidecar, and
@@ -527,3 +529,20 @@ getting data.
 
 MIT. See [LICENSE](LICENSE), [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md) and [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Goodreads scraper](https://github.com/2scraper/goodreads-scraper) — Lists, author books, search, full book pages and every…
+- [Hacker News scraper](https://github.com/2scraper/hackernews-scraper) — Story lists, whole comment trees and profiles from Hacker…
+- [Medium scraper](https://github.com/2scraper/medium-scraper) — Tag feeds, day archives, author pages and full story text…
+- [Perplexity scraper](https://github.com/2scraper/perplexity-scraper) — Pages and Discover articles
+- [Snapchat scraper](https://github.com/2scraper/snapchat-scraper) — Public Snapchat profiles, Spotlight engagement and story…
+- [TikTok Ad Library scraper](https://github.com/2scraper/tiktok-ads-scraper) — Ads from TikTok's EU Ad Library
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
