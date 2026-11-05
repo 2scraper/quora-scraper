@@ -3893,6 +3893,11 @@ def test_canary_reports_proxy_traffic():
                             "proxy_budget_bytes": 25_000_000,
                             "proxy_budget_exceeded": True}),
                 ("plain", {"status": "complete"}),
+                ("deadlogin", {"status": "failed",
+                               "stop_reason": "proxy_auth_failed"}),
+                ("parser", {"status": "failed", "proxy_bytes": 1_000_000,
+                            "proxy_budget_bytes": 25_000_000,
+                            "stop_reason": "parser_found_nothing"}),
                 ("missing", None)):
             out = os.path.join(tmp, case)
             if meta is not None:
@@ -3921,6 +3926,18 @@ def test_canary_reports_proxy_traffic():
     ok &= check("no proxy fields / no sidecar: reported, not a crash",
                 results["plain"][0] == 0 and results["missing"][0] == 0
                 and "not metered" in written and "unknown" in written)
+    # Exit 5 is a dead proxy login and a parser regression alike; the
+    # summary line is where the run says which. A complete run gets no
+    # stop_reason suffix.
+    ok &= check("a failed run's stop_reason is on its summary line, with the "
+                "fix named for a refused proxy login",
+                results["deadlogin"][0] == 0
+                and "stop_reason `proxy_auth_failed`: the proxy refused its "
+                    "login" in written
+                and "**live/parser**: proxy traffic 1.0 MB of 25 MB — status "
+                    "failed, stop_reason `parser_found_nothing`" in written
+                and "**live/plain**: proxy traffic not metered (no traffic "
+                    "went through a local proxy on this run)\n" in written)
     return ok
 
 

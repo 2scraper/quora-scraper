@@ -427,6 +427,15 @@ same address was challenged — about thirty attempts over three hours, a
 45-minute rest included, and a second language host made no difference.
 Nothing about the address changed except how much it had been fetching.
 
+Both statements are about the same route — an ordinary page fetch of a
+question, topic or profile — and neither is a property of the site: what
+decides it is the address and how much it has fetched lately. A fresh
+address is not guaranteed a pass either. On 2026-11-05 a different
+datacentre address, not used against Quora that day, was challenged on all
+three fetches of one question page (exit 3), while the canary through a US
+residential proxy exit was served the question and a topic feed in full the
+same hour.
+
 So what the paid products buy here is **rate**: many addresses is how you
 fetch a lot of Quora, and one address plus a generous `--delay` is how you
 fetch a little of it for free.
@@ -511,7 +520,16 @@ default, which is unchanged. Measured 2026-10-21 through `QUORA_PROXY`: a
 question run (3 pages) reached the 10 MB cap with images, video/audio and
 fonts already blocked, so a 10 MB canary would stop on a healthy page. The
 step summary shows each run's traffic against the budget recorded in its
-sidecar, and a run that hits 25 MB still fails the job.
+sidecar, and a run that hits 25 MB still fails the job. A run that did not
+complete has its `stop_reason` on that same line: exit 5 is both a refused
+proxy login (`proxy_auth_failed`) and a parser that found nothing
+(`parser_found_nothing`), and only the sidecar tells them apart.
+
+The topic half asserts that `author_credential` is filled on at least one
+row and never carries the author's name or the date, but not a share of
+rows: a credential is optional on Quora, and the share follows whoever
+posted to the topic that week (22 of 30 on 2026-11-05, every null a card
+with no credential on it).
 
 ---
 

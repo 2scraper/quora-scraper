@@ -150,7 +150,7 @@ jobs:
               echo "### Canary FAILED: partial run (exit 6)" >> "$GITHUB_STEP_SUMMARY"
               exit 1 ;;
             5)
-              echo "::error::The content was never obtained (exit 5) $via: a navigation timeout, a dead proxy, a 404, or a page that held answers and parsed to none (stop_reason parser_found_nothing, which is a parser regression). Nothing was tested; see the log and the artefacts."
+              echo "::error::The content was never obtained (exit 5) $via. The stop_reason on the 'Proxy traffic of the question run' line names which: proxy_auth_failed / proxy_balance_exhausted (the QUORA_PROXY secret's login or balance, not the site), a navigation timeout, a 404, or parser_found_nothing (a page that held answers and parsed to none, which is a parser regression). Nothing was tested; see the log and the artefacts."
               echo "### Canary FAILED: content never obtained (exit 5)" >> "$GITHUB_STEP_SUMMARY"
               exit 1 ;;
             4)
@@ -413,12 +413,36 @@ jobs:
 
           # The card hooks are everything in this mode.
           for field, floor in (("title", 1.0), ("author", 0.95),
-                               ("text", 0.95), ("date_text", 0.95),
-                               ("author_credential", 0.80)):
+                               ("text", 0.95), ("date_text", 0.95)):
               got = sum(1 for r in rows if r.get(field) not in (None, ""))
               if rows and got / len(rows) < floor:
                   fail.append(f"{field} present on only {got}/{len(rows)} "
                               f"topic rows (floor {floor:.0%})")
+
+          # author_credential has NO share floor, because its share is the
+          # feed's, not the parser's: a credential is optional on Quora and a
+          # topic feed is 30 answers by whoever posted this week. Measured
+          # 2026-11-05: 22 of 30, and every one of the 8 nulls was a card
+          # whose header held only the author and the date (5 of them one
+          # author with no credential). The old 80% floor failed that run
+          # with the parser right on every row. What a broken hook does
+          # instead is take the column to zero, or leak the author or the
+          # date into it, so those are what is asserted.
+          creds = [r for r in rows if r.get("author_credential")]
+          if rows and not creds:
+              fail.append(f"author_credential is null on all {len(rows)} "
+                          f"topic rows — the header hook has most likely moved")
+          for r in creds:
+              cred = r["author_credential"]
+              # The header reads "{Author} {Credential} · {Date}", so a
+              # failed split leaves the author in front or the date behind.
+              leaked = [v for v, edge in ((r.get("author"), cred.startswith),
+                                          (r.get("date_text"), cred.endswith))
+                        if v and edge(v)]
+              if leaked:
+                  fail.append(f"{r.get('sku')}: author_credential {cred!r} "
+                              f"carries {leaked} — the header split is wrong")
+                  break
 
           if fail:
               print("::error::The topic run parsed rows that do not look right:")
@@ -431,7 +455,7 @@ jobs:
       - name: Fail when the topic run did not parse rows
         if: ${{ !cancelled() && steps.topic.outcome != 'skipped' && steps.topic.outputs.exit_code != '0' }}
         run: |
-          echo "::error::The topic run exited ${{ steps.topic.outputs.exit_code }} — the DOM-only path was NOT tested today (3 = blocked, 5 = content never obtained, 4 = zero rows). If it is a block from the bare runner, set the QUORA_PROXY secret. See the artefacts."
+          echo "::error::The topic run exited ${{ steps.topic.outputs.exit_code }} — the DOM-only path was NOT tested today (3 = blocked, 5 = content never obtained, 4 = zero rows). The stop_reason is on the 'Proxy traffic of the topic run' line. If it is a block from a bare runner (HAVE_PROXY=$HAVE_PROXY), set the QUORA_PROXY secret. See the artefacts."
           echo "### Canary FAILED: the topic (DOM-only) half did not parse rows" >> "$GITHUB_STEP_SUMMARY"
           exit 1
 

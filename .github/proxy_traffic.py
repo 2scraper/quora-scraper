@@ -13,6 +13,12 @@ not go through a local proxy, is reported as such and is not a failure here
 budget prints `::error::stopped: proxy budget Y MB exceeded` and exits 1.
 Y is the run's own budget, `proxy_budget_bytes` in the sidecar (the canary
 passes `--proxy-budget-mb 25`), so the text follows whatever the run was given.
+
+A run whose sidecar says it did not complete also gets its `stop_reason` on
+that line. The exit-code steps only see a number, and exit 5 covers a dead
+proxy login and a parser regression alike: from 2026-10-26 to 2026-11-02 the
+canary was red on `proxy_auth_failed` (the QUORA_PROXY login was refused)
+while every message on the run listed generic causes of exit 5.
 """
 
 import json
@@ -20,6 +26,16 @@ import os
 import sys
 
 MB = 1_000_000
+
+
+# The stop reasons whose fix is outside the code, named so a red run says it.
+STOP_HINTS = {
+    "proxy_auth_failed": "the proxy refused its login (HTTP 407): the "
+                         "QUORA_PROXY credentials are wrong or expired, or "
+                         "the proxy account is out of traffic",
+    "proxy_balance_exhausted": "the proxy answered HTTP 402; its traffic "
+                               "balance is used up",
+}
 
 
 def _load(out):
@@ -47,14 +63,21 @@ def main(argv):
     if not isinstance(meta, dict):
         line = f"**{label}**: proxy traffic unknown (no sidecar was written)"
     elif "proxy_bytes" not in meta:
-        line = (f"**{label}**: proxy traffic not metered (no local proxy "
-                f"on this run)")
+        line = (f"**{label}**: proxy traffic not metered (no traffic went "
+                f"through a local proxy on this run)")
     else:
         used = (meta.get("proxy_bytes") or 0) / MB
         cap = meta.get("proxy_budget_bytes")
         cap_text = _mb(cap) if cap else "no budget"
         line = f"**{label}**: proxy traffic {used:.1f} MB of {cap_text}"
         exceeded = bool(meta.get("proxy_budget_exceeded"))
+    hint = None
+    if isinstance(meta, dict) and meta.get("status") not in (None, "complete"):
+        reason = meta.get("stop_reason") or "unknown"
+        line += f" — status {meta.get('status')}, stop_reason `{reason}`"
+        hint = STOP_HINTS.get(reason)
+        if hint:
+            line += f": {hint}"
     print(line)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
