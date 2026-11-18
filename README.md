@@ -561,6 +561,6 @@ Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.m
 - [Medium scraper](https://github.com/2scraper/medium-scraper) — Tag feeds, day archives, author pages and full story text…
 - [Perplexity scraper](https://github.com/2scraper/perplexity-scraper) — Pages and Discover articles
 - [Snapchat scraper](https://github.com/2scraper/snapchat-scraper) — Public Snapchat profiles, Spotlight engagement and story…
-- [TikTok Ad Library scraper](https://github.com/2scraper/tiktok-ads-scraper) — Ads from TikTok's EU Ad Library
+- [TikTok Ads scraper](https://github.com/2scraper/tiktok-ads-scraper) — EU and EEA ads from the TikTok Ad Library
 
 All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
