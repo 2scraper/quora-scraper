@@ -61,6 +61,8 @@ bad default or violating the promise quietly.
 
 ### Changed
 
+- CI only: the offline-checks job runs on `ubuntu-24.04` instead of `ubuntu-latest`, which moved to Ubuntu 26.04, where `actions/setup-python` has no Python 3.9 build. 3.9 stays the supported floor.
+- Docker: the image installs `libatomic1` before Playwright. Recent Playwright releases' Node driver needs it to run `playwright install` at all, and the slim base image does not ship it, so the image build failed.
 - A page that never loads is now logged with the browser's own reason, in all three engines. Before, Playwright logged every failed navigation as "Timeout loading ..." with no reason, even when the error came 64 ms after the navigation started (canary 2026-10-20, topic run through `QUORA_PROXY`). Now a real timeout still reads "Timeout loading", any other navigation error reads "Navigation failed loading", and both include the error's first line with proxy credentials masked. The sidecar gains `load_error`: the reason for the first page that never loaded, or `null`. Exit codes and `stop_reason` are unchanged.
 - CI only: when the question run's proxy-traffic step fails (budget exceeded), the canary's "Interpret the exit code" step still runs and reports that run's own verdict; before, GitHub skipped it and the log showed only the budget error. The job's result is unchanged: it is red either way.
 - CI only: the canary runs now pass `--proxy-budget-mb 25` instead of 10 (measured 2026-10-21: a question run hit the 10 MB cap with media already blocked); the step summary reports the budget from each run's sidecar. The scraper's default budget stays 10 MB.
